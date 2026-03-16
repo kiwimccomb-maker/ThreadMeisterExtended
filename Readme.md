@@ -106,27 +106,21 @@ All dimensions follow CNC Kitchen's official recommendations:
 | M10 x 12.7mm | 12.0mm | 12.7mm | 5.0mm |
 | 1/4"-20 x 12.7mm | 8.0mm | 12.7mm | 3.0mm |
 
-**Note:**  For blind holes, the add‑in automatically adds 1 mm extra depth for clearance by default.
+**Note:** For blind holes, the total extrude depth = insert length + extra depth + chamfer (if enabled). For example, with an M3 x 5.7 mm insert and default settings: 5.7 + 1.0 extra + 0.5 chamfer = 7.2 mm. The chamfer is added to the extrude length because it cuts into the top of the bore and would otherwise reduce usable depth for the insert.
 
 ### Customize settings
 
-Edit `config.ini` to adjust behavior. The file is located in the add-in folder.
+Edit `config.ini` to adjust behavior. The file is located in the add-in folder. The config is organized into four sections:
 
-**`[Settings]`**
+**`[Settings]`** — Design parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `chamfer_size` | 0.5 | Top chamfer size in mm (45° chamfer) |
-| `chamfer_enabled_default` | True | Chamfer checkbox default state in the dialog |
+| `chamfer_size` | 0.5 | Top chamfer size in mm (45° chamfer). The chamfer cuts into the top of the bore, reducing usable depth for the insert. |
+| `blind_hole_extra_depth` | 1.0 | Extra depth added to blind holes in mm. Compensates for chamfer depth and provides clearance below the insert. |
 | `bottom_radius_size` | 0.5 | Bottom fillet radius in mm (blind holes only) |
-| `bottom_radius_enabled_default` | True | Bottom fillet checkbox default state in the dialog |
-| `blind_hole_extra_depth` | 1.0 | Extra depth added to blind holes in mm (clearance for insert) |
-| `hole_type_blind` | True | Default hole type: `True` = Blind Hole, `False` = Through Hole |
-| `show_success_message` | False | Show confirmation dialog after successful operation |
-| `enable_logging` | False | Write debug messages to Fusion's Text Commands palette |
-| `enable_debug_export` | False | Show "Export Debug JSON" checkbox in the dialog (for development) |
 
-**`[Inserts]`**
+**`[Inserts]`** — Insert specifications
 
 Each line defines an insert: `name = hole_diameter_mm, insert_length_mm, min_wall_thickness_mm`
 
@@ -134,6 +128,23 @@ You can add custom inserts by adding a new line, e.g.:
 ```ini
 M3 x 6mm (custom) = 4.6, 6.0, 1.8
 ```
+
+**`[UI State]`** — Remembered menu state (saved automatically between sessions)
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `chamfer_enabled_default` | True | Chamfer checkbox state |
+| `bottom_radius_enabled_default` | False | Bottom fillet checkbox state |
+| `show_success_message` | True | Show confirmation dialog after operation |
+| `hole_type_blind` | True | Hole type: `True` = Blind, `False` = Through |
+| `last_selected_insert` | M3 x 5.7mm (standard) | Last selected insert size |
+
+**`[Developer]`** — Debug options (for development and support)
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `enable_logging` | False | Write debug messages to Fusion's Text Commands palette |
+| `enable_debug_export` | False | Show "Export Debug JSON" checkbox in the dialog |
 
 
 
@@ -176,6 +187,12 @@ M3 x 6mm (custom) = 4.6, 6.0, 1.8
 
 
 ## Changelog
+
+### v1.2.2 — 2026-03-16
+- Config.ini reorganized into 4 sections (`[Settings]`, `[Inserts]`, `[UI State]`, `[Developer]`)
+- Improved error messages with per-point failure details
+- Chamfer size now added to blind hole extrude depth (was missing before)
+- Info text updates dynamically when toggling chamfer checkbox
 
 ### v1.2.1 — 2026-03-14
 - Added privacy policy (required for Autodesk App Store)

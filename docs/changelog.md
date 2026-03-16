@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.2 — 2026-03-16 — Config restructure & depth fix
+- **Config.ini reorganized** into 4 sections: `[Settings]`, `[Inserts]`, `[UI State]`, `[Developer]`
+- Auto-migration: old single-section configs are upgraded automatically on load
+- **Chamfer depth fix**: chamfer size is now added to blind hole extrude depth (was missing before)
+- Info text updates dynamically when toggling chamfer checkbox
+- **Improved error messages**: failure dialogs now show per-point details
+- Shared `calc_blind_hole_depth_mm()` helper eliminates depth formula duplication
+- Updated README config parameter documentation with section descriptions
+- Bundled `resources/help.html` reference documentation
+
 ## 1.2.1 — 2026-03-14 — Privacy policy & packaging
 - Added privacy policy section to README (required for Autodesk App Store)
 - Added `package.bat` script for creating App Store zip packages

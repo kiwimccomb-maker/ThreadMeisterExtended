@@ -71,6 +71,15 @@ if exist "%SOURCE%resources\icons\" (
     echo   MISSING  resources\icons\
 )
 
+:: ── Copy help file ──────────────────────────────────────────────────────────
+if exist "%SOURCE%resources\help.html" (
+    if %DRYRUN%==0 (
+        if not exist "%TARGET%\resources\" mkdir "%TARGET%\resources"
+        xcopy /y /q "%SOURCE%resources\help.html" "%TARGET%\resources\" >nul
+    )
+    echo   Copied   resources\help.html
+)
+
 echo.
 if %DRYRUN%==1 (
     echo Dry run complete. No files were changed.

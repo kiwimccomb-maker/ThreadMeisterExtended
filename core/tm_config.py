@@ -2,17 +2,58 @@
 tm_config.py – Configuration loading, validation, saving, and defaults.
 
 Reads/writes config.ini. Mutates INSERT_SPECS and CONFIG in tm_state.
+
+Config sections:
+  [Settings]   - Design parameters (chamfer_size, blind_hole_extra_depth, bottom_radius_size)
+  [Inserts]    - Insert specifications (name = diameter, length, min_wall)
+  [UI State]   - Remembered menu state (chamfer_enabled_default, bottom_radius_enabled_default, etc.)
+  [Developer]  - Debug flags (enable_logging, enable_debug_export)
 """
 import os
 import configparser
 import tm_state
 
 
+def _get_config_path():
+    """Return the absolute path to config.ini."""
+    addon_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    return os.path.join(addon_path, 'config.ini')
+
+
+def _read_config_file(config_file=None):
+    """Read and return a RawConfigParser from config.ini."""
+    if config_file is None:
+        config_file = _get_config_path()
+    config = configparser.RawConfigParser()
+    config.optionxform = str  # Preserve case
+    config.read(config_file, encoding='utf-8')
+    return config
+
+
+def _is_old_format(config):
+    """Check if config uses old single-section format (no [UI State] section)."""
+    return not config.has_section('UI State')
+
+
+def _get(config, key, section_new, fallback, getter='get'):
+    """Read a key from the correct section, falling back to [Settings] for old format."""
+    for section in (section_new, 'Settings'):
+        if config.has_section(section) and config.has_option(section, key):
+            try:
+                if getter == 'float':
+                    return config.getfloat(section, key)
+                elif getter == 'boolean':
+                    return config.getboolean(section, key)
+                else:
+                    return config.get(section, key)
+            except (ValueError, configparser.Error):
+                return fallback
+    return fallback
+
+
 def load_config():
     """Load configuration from config.ini with validation. Creates defaults if missing."""
-    addon_path = os.path.dirname(os.path.realpath(__file__))
-    addon_path = os.path.dirname(addon_path)  # Go up one level from core/
-    config_file = os.path.join(addon_path, 'config.ini')
+    config_file = _get_config_path()
 
     if not os.path.exists(config_file):
         create_default_config()
@@ -21,80 +62,47 @@ def load_config():
     warnings = []
 
     try:
-        config = configparser.RawConfigParser()
-        config.optionxform = str  # Preserve case
-        config.read(config_file, encoding='utf-8')
+        config = _read_config_file(config_file)
+        needs_migration = _is_old_format(config)
 
-        if config.has_section('Settings'):
-            try:
-                chamfer = config.getfloat('Settings', 'chamfer_size', fallback=0.5)
-                if chamfer <= 0 or chamfer > 5.0:
-                    warnings.append(f'Chamfer size {chamfer}mm is unusual (expected 0-5mm). Using default 0.5mm.')
-                    chamfer = 0.5
-                tm_state.CONFIG['chamfer_size'] = chamfer
-            except ValueError:
-                warnings.append('Invalid chamfer_size value. Using default 0.5mm.')
-                tm_state.CONFIG['chamfer_size'] = 0.5
+        # --- [Settings]: Design parameters ---
+        chamfer = _get(config, 'chamfer_size', 'Settings', 0.5, 'float')
+        if chamfer <= 0 or chamfer > 5.0:
+            warnings.append(f'Chamfer size {chamfer}mm is unusual (expected 0-5mm). Using default 0.5mm.')
+            chamfer = 0.5
+        tm_state.CONFIG['chamfer_size'] = chamfer
 
-            try:
-                extra_depth = config.getfloat('Settings', 'blind_hole_extra_depth', fallback=1.0)
-                if extra_depth < 0 or extra_depth > 10.0:
-                    warnings.append(f'Extra depth {extra_depth}mm is unusual (expected 0-10mm). Using default 1.0mm.')
-                    extra_depth = 1.0
-                tm_state.CONFIG['blind_hole_extra_depth'] = extra_depth
-            except ValueError:
-                warnings.append('Invalid blind_hole_extra_depth value. Using default 1.0mm.')
-                tm_state.CONFIG['blind_hole_extra_depth'] = 1.0
+        extra_depth = _get(config, 'blind_hole_extra_depth', 'Settings', 1.0, 'float')
+        if extra_depth < 0 or extra_depth > 10.0:
+            warnings.append(f'Extra depth {extra_depth}mm is unusual (expected 0-10mm). Using default 1.0mm.')
+            extra_depth = 1.0
+        tm_state.CONFIG['blind_hole_extra_depth'] = extra_depth
 
-            try:
-                tm_state.CONFIG['chamfer_enabled_default'] = config.getboolean('Settings', 'chamfer_enabled_default', fallback=True)
-            except ValueError:
-                warnings.append('Invalid chamfer_enabled_default value. Using default True.')
-                tm_state.CONFIG['chamfer_enabled_default'] = True
+        bottom_radius = _get(config, 'bottom_radius_size', 'Settings', 0.5, 'float')
+        if bottom_radius < 0 or bottom_radius > 5.0:
+            warnings.append(f'Bottom radius {bottom_radius}mm is unusual (expected 0-5mm). Using default 0.5mm.')
+            bottom_radius = 0.5
+        tm_state.CONFIG['bottom_radius_size'] = bottom_radius
 
-            try:
-                bottom_radius = config.getfloat('Settings', 'bottom_radius_size', fallback=0.5)
-                if bottom_radius < 0 or bottom_radius > 5.0:
-                    warnings.append(f'Bottom radius {bottom_radius}mm is unusual (expected 0-5mm). Using default 0.5mm.')
-                    bottom_radius = 0.5
-                tm_state.CONFIG['bottom_radius_size'] = bottom_radius
-            except ValueError:
-                warnings.append('Invalid bottom_radius_size value. Using default 0.5mm.')
-                tm_state.CONFIG['bottom_radius_size'] = 0.5
+        # --- [UI State]: Remembered menu state ---
+        tm_state.CONFIG['chamfer_enabled_default'] = _get(
+            config, 'chamfer_enabled_default', 'UI State', True, 'boolean')
+        tm_state.CONFIG['bottom_radius_enabled_default'] = _get(
+            config, 'bottom_radius_enabled_default', 'UI State', False, 'boolean')
+        tm_state.CONFIG['show_success_message'] = _get(
+            config, 'show_success_message', 'UI State', True, 'boolean')
+        tm_state.CONFIG['hole_type_blind'] = _get(
+            config, 'hole_type_blind', 'UI State', True, 'boolean')
+        tm_state.CONFIG['last_selected_insert'] = _get(
+            config, 'last_selected_insert', 'UI State', 'M3 x 5.7mm (standard)')
 
-            try:
-                tm_state.CONFIG['bottom_radius_enabled_default'] = config.getboolean('Settings', 'bottom_radius_enabled_default', fallback=False)
-            except ValueError:
-                warnings.append('Invalid bottom_radius_enabled_default value. Using default False.')
-                tm_state.CONFIG['bottom_radius_enabled_default'] = False
+        # --- [Developer]: Debug flags ---
+        tm_state.CONFIG['enable_logging'] = _get(
+            config, 'enable_logging', 'Developer', False, 'boolean')
+        tm_state.CONFIG['enable_debug_export'] = _get(
+            config, 'enable_debug_export', 'Developer', False, 'boolean')
 
-            try:
-                tm_state.CONFIG['show_success_message'] = config.getboolean('Settings', 'show_success_message', fallback=True)
-            except ValueError:
-                warnings.append('Invalid show_success_message value. Using default True.')
-                tm_state.CONFIG['show_success_message'] = True
-
-            try:
-                tm_state.CONFIG['hole_type_blind'] = config.getboolean('Settings', 'hole_type_blind', fallback=True)
-            except ValueError:
-                tm_state.CONFIG['hole_type_blind'] = True
-
-            try:
-                tm_state.CONFIG['enable_logging'] = config.getboolean('Settings', 'enable_logging', fallback=False)
-            except ValueError:
-                tm_state.CONFIG['enable_logging'] = False
-
-            try:
-                tm_state.CONFIG['enable_debug_export'] = config.getboolean('Settings', 'enable_debug_export', fallback=False)
-            except ValueError:
-                tm_state.CONFIG['enable_debug_export'] = False
-
-            try:
-                tm_state.CONFIG['last_selected_insert'] = config.get('Settings', 'last_selected_insert', fallback='M3 x 5.7mm (standard)')
-            except Exception:
-                tm_state.CONFIG['last_selected_insert'] = 'M3 x 5.7mm (standard)'
-
-        # Load inserts
+        # --- [Inserts] ---
         tm_state.INSERT_SPECS.clear()
         if config.has_section('Inserts'):
             for name in config.options('Inserts'):
@@ -134,6 +142,10 @@ def load_config():
             tm_state.INSERT_SPECS.update(get_default_inserts())
             warnings.append('Using default CNC Kitchen specifications.')
 
+        # Auto-migrate old format to new sections
+        if needs_migration:
+            _migrate_config(config_file)
+
         if errors or warnings:
             msg = ''
             if errors:
@@ -151,17 +163,59 @@ def load_config():
     return tm_state.INSERT_SPECS, tm_state.CONFIG
 
 
+def _migrate_config(config_file):
+    """Rewrite config.ini from old single-section format to new multi-section format."""
+    try:
+        _write_config_file(config_file)
+    except Exception:
+        pass  # Migration failure is non-critical; old format still works
+
+
+def _write_config_file(config_file=None):
+    """Write current CONFIG and INSERT_SPECS to config.ini in the new multi-section format."""
+    if config_file is None:
+        config_file = _get_config_path()
+
+    config = configparser.RawConfigParser()
+    config.optionxform = str
+
+    # [Settings]
+    config.add_section('Settings')
+    config.set('Settings', 'chamfer_size', str(tm_state.CONFIG.get('chamfer_size', 0.5)))
+    config.set('Settings', 'blind_hole_extra_depth', str(tm_state.CONFIG.get('blind_hole_extra_depth', 1.0)))
+    config.set('Settings', 'bottom_radius_size', str(tm_state.CONFIG.get('bottom_radius_size', 0.5)))
+
+    # [Inserts]
+    config.add_section('Inserts')
+    for name, (dia, length, wall) in tm_state.INSERT_SPECS.items():
+        config.set('Inserts', name, f'{dia}, {length}, {wall}')
+
+    # [UI State]
+    config.add_section('UI State')
+    config.set('UI State', 'chamfer_enabled_default', str(tm_state.CONFIG.get('chamfer_enabled_default', True)))
+    config.set('UI State', 'bottom_radius_enabled_default', str(tm_state.CONFIG.get('bottom_radius_enabled_default', False)))
+    config.set('UI State', 'show_success_message', str(tm_state.CONFIG.get('show_success_message', True)))
+    config.set('UI State', 'hole_type_blind', str(tm_state.CONFIG.get('hole_type_blind', True)))
+    config.set('UI State', 'last_selected_insert', tm_state.CONFIG.get('last_selected_insert', 'M3 x 5.7mm (standard)'))
+
+    # [Developer]
+    config.add_section('Developer')
+    config.set('Developer', 'enable_logging', str(tm_state.CONFIG.get('enable_logging', False)))
+    config.set('Developer', 'enable_debug_export', str(tm_state.CONFIG.get('enable_debug_export', False)))
+
+    with open(config_file, 'w', encoding='utf-8') as f:
+        config.write(f)
+
+
 def save_last_selected_insert(insert_name):
     """Persist the last selected insert name to config.ini."""
     try:
-        addon_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-        config_file = os.path.join(addon_path, 'config.ini')
-        config = configparser.RawConfigParser()
-        config.optionxform = str
-        config.read(config_file, encoding='utf-8')
-        if not config.has_section('Settings'):
-            config.add_section('Settings')
-        config.set('Settings', 'last_selected_insert', insert_name)
+        config_file = _get_config_path()
+        config = _read_config_file(config_file)
+        section = 'UI State' if config.has_section('UI State') else 'Settings'
+        if not config.has_section(section):
+            config.add_section(section)
+        config.set(section, 'last_selected_insert', insert_name)
         with open(config_file, 'w', encoding='utf-8') as f:
             config.write(f)
     except Exception:
@@ -171,17 +225,15 @@ def save_last_selected_insert(insert_name):
 def save_checkbox_states(chamfer_state, radius_state, show_message_state, is_blind_hole):
     """Persist UI checkbox states and hole type to config.ini."""
     try:
-        addon_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-        config_file = os.path.join(addon_path, 'config.ini')
-        config = configparser.RawConfigParser()
-        config.optionxform = str
-        config.read(config_file, encoding='utf-8')
-        if not config.has_section('Settings'):
-            config.add_section('Settings')
-        config.set('Settings', 'chamfer_enabled_default', str(chamfer_state))
-        config.set('Settings', 'bottom_radius_enabled_default', str(radius_state))
-        config.set('Settings', 'show_success_message', str(show_message_state))
-        config.set('Settings', 'hole_type_blind', str(is_blind_hole))
+        config_file = _get_config_path()
+        config = _read_config_file(config_file)
+        section = 'UI State' if config.has_section('UI State') else 'Settings'
+        if not config.has_section(section):
+            config.add_section(section)
+        config.set(section, 'chamfer_enabled_default', str(chamfer_state))
+        config.set(section, 'bottom_radius_enabled_default', str(radius_state))
+        config.set(section, 'show_success_message', str(show_message_state))
+        config.set(section, 'hole_type_blind', str(is_blind_hole))
         with open(config_file, 'w', encoding='utf-8') as f:
             config.write(f)
     except Exception:
@@ -208,46 +260,29 @@ def get_default_inserts():
 
 
 def create_default_config():
-    """Write a default config.ini file."""
-    addon_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-    config_file = os.path.join(addon_path, 'config.ini')
+    """Write a default config.ini file in the new multi-section format."""
+    config_file = _get_config_path()
     try:
         with open(config_file, 'w', encoding='utf-8') as f:
             f.write('[Settings]\n')
-            f.write('# Default chamfer size in mm\n')
             f.write('chamfer_size = 0.5\n')
-            f.write('\n')
-            f.write('# Extra depth added to blind holes in mm (recommended: 1.0mm)\n')
             f.write('blind_hole_extra_depth = 1.0\n')
-            f.write('\n')
-            f.write('# Default chamfer checkbox state (True or False)\n')
-            f.write('chamfer_enabled_default = True\n')
-            f.write('\n')
-            f.write('# Bottom radius size for blind holes in mm (for rounding the bottom edge)\n')
             f.write('bottom_radius_size = 0.5\n')
             f.write('\n')
-            f.write('# Default bottom radius checkbox state (True or False)\n')
-            f.write('bottom_radius_enabled_default = False\n')
-            f.write('\n')
-            f.write('# Show success message after operation (True or False)\n')
-            f.write('show_success_message = True\n')
-            f.write('\n')
-            f.write('# Enable logging to Fusion TextCommands console (True or False)\n')
-            f.write('enable_logging = False\n')
-            f.write('\n')
-            f.write('# Enable debug JSON export button in dialog (developer/support feature)\n')
-            f.write('enable_debug_export = False\n')
-            f.write('\n')
-            f.write('# Last selected insert (will be remembered between sessions)\n')
-            f.write('last_selected_insert = M3 x 5.7mm (standard)\n')
-            f.write('\n\n')
             f.write('[Inserts]\n')
             for name, (dia, length, wall) in get_default_inserts().items():
                 f.write(f'{name} = {dia}, {length}, {wall}\n')
             f.write('\n')
-            f.write('# Add your custom inserts below:\n')
-            f.write('# My Custom M3 = 4.5, 6.0, 1.6\n')
-            f.write('# My Custom M4 = 5.7, 9.0, 2.0\n')
+            f.write('[UI State]\n')
+            f.write('chamfer_enabled_default = True\n')
+            f.write('bottom_radius_enabled_default = False\n')
+            f.write('show_success_message = True\n')
+            f.write('hole_type_blind = True\n')
+            f.write('last_selected_insert = M3 x 5.7mm (standard)\n')
+            f.write('\n')
+            f.write('[Developer]\n')
+            f.write('enable_logging = False\n')
+            f.write('enable_debug_export = False\n')
     except Exception as e:
         if tm_state._ui:
             tm_state._ui.messageBox(f'Could not create config.ini: {str(e)}')

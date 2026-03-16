@@ -4,7 +4,7 @@ tm_execute.py – CommandExecuteHandler: orchestrates the hole creation loop.
 import adsk.core, adsk.fusion, traceback, os
 import tm_state
 import tm_config
-from tm_helpers import calc_blind_hole_depth
+from tm_helpers import calc_blind_hole_depth_mm
 from tm_geometry import (
     findProfileForCircle,
     findExtrudeDirectionFromSketch,
@@ -48,6 +48,7 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
 
             successCount = 0
             failedCount = 0
+            failMessages = []
 
             component = targetBody.parentComponent
             design = component.parentDesign
@@ -82,6 +83,7 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
 
                 if profile_or_collection is None:
                     failedCount += 1
+                    failMessages.append(f'Point {point_idx+1}: Could not create bore profile.')
                     tempSketch.deleteMe()
                     continue
 
@@ -103,6 +105,7 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
 
                 if direction is None:
                     failedCount += 1
+                    failMessages.append(f'Point {point_idx+1}: Could not determine extrusion direction. Ensure the sketch is on a planar face of the target body.')
                     tempSketch.deleteMe()
                     continue
 
@@ -110,7 +113,10 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                 extInput = extrudes.createInput(profile_or_collection, adsk.fusion.FeatureOperations.CutFeatureOperation)
 
                 if isBlindHole:
-                    holeDepth = calc_blind_hole_depth(insertLen, tm_state.CONFIG['blind_hole_extra_depth'])
+                    chamfer = tm_state.CONFIG['chamfer_size'] if includeChamfer else 0.0
+                    depth_mm = calc_blind_hole_depth_mm(
+                        insertLen, tm_state.CONFIG['blind_hole_extra_depth'], chamfer)
+                    holeDepth = depth_mm / 10.0  # mm -> cm
                     dist = adsk.core.ValueInput.createByReal(holeDepth)
                     extent = adsk.fusion.DistanceExtentDefinition.create(dist)
                     extInput.setOneSideExtent(extent, direction)
@@ -146,8 +152,9 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                     pass
 
             if failedCount > 0:
+                details = '\n'.join(failMessages)
                 tm_state._ui.messageBox(
-                    f'Created {successCount} insert hole(s).\n{failedCount} failed (no intersection with target body).'
+                    f'Created {successCount} insert hole(s), {failedCount} failed.\n\n{details}'
                 )
             elif showMessage:
                 tm_state._ui.messageBox(f'Successfully created {successCount} insert hole(s).')

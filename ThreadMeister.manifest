@@ -6,7 +6,7 @@
     "description": {
         "": "Create heat-set insert holes with CNC Kitchen recommendations"
     },
-    "version": "1.2.1",
+    "version": "1.2.2",
     "runOnStartup": false,
     "supportedOS": "windows|mac",
     "editEnabled": true,

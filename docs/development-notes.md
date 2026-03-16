@@ -25,7 +25,6 @@ ThreadMeister/
 ├── ThreadMeister.png         ← Add-in icon (App Store)
 ├── License.txt               ← MIT License
 ├── Readme.md                 ← GitHub README
-├── Readme_AppStore.md        ← Autodesk App Store README
 ├── core/
 │   ├── tm_state.py           ← Global state: INSERT_SPECS, CONFIG, tolerances
 │   ├── tm_config.py          ← Config I/O: load/save config.ini
@@ -36,11 +35,14 @@ ThreadMeister/
 │   └── tm_debug_export.py    ← Debug: export sketch data to JSON fixtures
 ├── resources/
 │   ├── icons/                ← Toolbar icons (16x16 – 128x128)
-│   └── images/               ← Screenshots, title graphic, animated GIF
+│   ├── images/               ← Screenshots, title graphic, animated GIF
+│   └── help.html             ← Bundled reference documentation
 ├── scripts/
-│   ├── deploy.bat            ← Copy add-in to Fusion 360 scripts folder
+│   ├── deploy.bat            ← Copy add-in to Fusion 360 AddIns folder
+│   ├── package.bat           ← Create App Store .zip in dist/
 │   ├── visualize_profiles.py ← Matplotlib visualization of exported fixtures
-│   └── profile_inspector.py  ← Interactive profile/curve inspector
+│   ├── profile_inspector.py  ← Interactive profile/curve inspector
+│   └── fixture_inspector.py  ← Standalone fixture JSON viewer
 ├── fixtures/                 ← JSON test fixtures exported from Fusion 360
 ├── tests/
 │   ├── conftest.py           ← Pytest config: adsk mock, path setup
@@ -48,11 +50,26 @@ ThreadMeister/
 │   ├── test_config.py        ← Tests for tm_config
 │   ├── test_geometry.py      ← Tests for tm_geometry filter functions
 │   └── test_profile_selection.py ← Fixture-based profile selection tests
-├── fixture_inspector.py      ← Standalone fixture JSON viewer
+├── dist/                     ← Build output (gitignored)
 └── docs/
     ├── development-notes.md  ← This file
     └── changelog.md          ← Version history
 ```
+
+## Config.ini Structure (v1.2.2)
+
+The config file is organized into four sections:
+
+| Section | Purpose | Persistence |
+|---------|---------|-------------|
+| `[Settings]` | Design parameters (chamfer_size, blind_hole_extra_depth, bottom_radius_size) | User-edited |
+| `[Inserts]` | Insert specifications (name = diameter, length, min_wall) | User-edited |
+| `[UI State]` | Remembered menu state (checkbox states, last insert, hole type) | Auto-saved by add-in |
+| `[Developer]` | Debug flags (enable_logging, enable_debug_export) | User-edited |
+
+**Backward compatibility:** `tm_config.py` auto-migrates old single-section configs. If `[UI State]` is missing, all keys are read from `[Settings]` as fallback. On next save, the file is rewritten in the new format.
+
+**Chamfer/depth relationship:** The chamfer size is added to the extrude length because the chamfer cuts into the top of the bore. Total bore depth = insert length + `blind_hole_extra_depth` + chamfer (if enabled). Example with defaults: 5.7 + 1.0 + 0.5 = 7.2 mm.
 
 ## Code Structure (v1.2.0 — modular)
 
@@ -62,7 +79,7 @@ ThreadMeister/
 |--------|-------------|
 | `tm_state.py` | Global state: `INSERT_SPECS` dict, `CONFIG` dict, tolerances, UI reference |
 | `tm_config.py` | Config file I/O: load/save `config.ini`, default insert specs |
-| `tm_helpers.py` | Utilities: `isSamePoint()`, `isSameCircle()`, `calc_blind_hole_depth()`, `log()` |
+| `tm_helpers.py` | Utilities: `isSamePoint()`, `isSameCircle()`, `calc_blind_hole_depth()`, `calc_blind_hole_depth_mm()`, `log()` |
 | `tm_geometry.py` | Core geometry: `findProfileForCircle()`, `findExtrudeDirectionFromSketch()`, `findChamferEdge()`, `addChamferToEdge()`, `findDistanceThroughBody()`, `addBottomRadiusToBlindHole()` |
 | `tm_execute.py` | `CommandExecuteHandler.notify()` — orchestrates the hole creation loop |
 | `tm_ui.py` | `CommandCreatedHandler`, `InputChangedHandler`, `ValidateInputsHandler` |

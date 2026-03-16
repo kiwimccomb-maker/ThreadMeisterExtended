@@ -7,6 +7,7 @@ the updateInfoText helper that refreshes the info text box.
 import adsk.core, adsk.fusion, traceback
 import tm_state
 import tm_config
+from tm_helpers import calc_blind_hole_depth_mm
 from tm_execute import CommandExecuteHandler
 
 
@@ -113,7 +114,7 @@ class InputChangedHandler(adsk.core.InputChangedEventHandler):
                     pointSelect.isEnabled = True
                     pointSelect.hasFocus = True
 
-            if changedInput.id == 'insertSize' or changedInput.id == 'holeType':
+            if changedInput.id in ('insertSize', 'holeType', 'addChamfer'):
                 updateInfoText(inputs)
 
         except Exception:
@@ -148,17 +149,24 @@ def updateInfoText(inputs):
 
         holeDia, insertLen, minWall = tm_state.INSERT_SPECS[insertName]
 
+        addChamfer = inputs.itemById('addChamfer')
+        chamferOn = addChamfer.value if addChamfer else False
+
         if isBlindHole:
-            holeDepth = insertLen + tm_state.CONFIG['blind_hole_extra_depth']
-            holeTypeStr = 'Blind hole'
+            extra = tm_state.CONFIG['blind_hole_extra_depth']
+            chamfer = tm_state.CONFIG['chamfer_size'] if chamferOn else 0.0
+            holeDepth = calc_blind_hole_depth_mm(insertLen, extra, chamfer)
+            if chamferOn:
+                depthStr = f'{holeDepth:.1f} mm ({insertLen} + {extra} extra + {tm_state.CONFIG["chamfer_size"]} chamfer)'
+            else:
+                depthStr = f'{holeDepth:.1f} mm ({insertLen} + {extra} extra)'
         else:
-            holeDepth = 'Through body'
-            holeTypeStr = 'Through hole'
+            depthStr = 'Through body'
 
         info = (f'<b>Specifications:</b><br/>' +
                 f'Hole diameter: {holeDia} mm<br/>' +
                 f'Insert length: {insertLen} mm<br/>' +
-                f'Hole depth: {holeDepth}<br/>' +
+                f'Hole depth: {depthStr}<br/>' +
                 f'Min wall thickness: {minWall} mm')
 
         infoText.formattedText = info

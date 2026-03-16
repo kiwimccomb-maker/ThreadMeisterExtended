@@ -41,6 +41,21 @@ def calc_blind_hole_depth(insert_len_mm, extra_depth_mm):
     return (insert_len_mm + extra_depth_mm) / 10.0
 
 
+def calc_blind_hole_depth_mm(insert_len_mm, extra_depth_mm, chamfer_mm=0.0):
+    """
+    Calculate the total blind hole depth in mm.
+
+    Args:
+        insert_len_mm: Insert length in mm
+        extra_depth_mm: Extra clearance depth in mm
+        chamfer_mm: Chamfer size in mm (added when chamfer is enabled)
+
+    Returns:
+        Total depth in mm as a float.
+    """
+    return insert_len_mm + extra_depth_mm + chamfer_mm
+
+
 def log(msg):
     """Write a message to Fusion's Text Commands palette (only if logging enabled)."""
     try:

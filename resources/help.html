@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>ThreadMeister Help</title>
+    <style>
+        body { font-family: Segoe UI, Arial, sans-serif; margin: 20px; max-width: 700px; line-height: 1.5; color: #333; }
+        h1 { color: #FF6F00; font-size: 1.4em; }
+        h2 { color: #555; font-size: 1.1em; margin-top: 1.5em; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+        table { border-collapse: collapse; width: 100%; margin: 10px 0; }
+        th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; font-size: 0.9em; }
+        th { background: #f5f5f5; }
+        code { background: #f0f0f0; padding: 1px 4px; border-radius: 3px; font-size: 0.9em; }
+        ol { padding-left: 20px; }
+        .note { background: #fff8e1; border-left: 3px solid #FF6F00; padding: 8px 12px; margin: 10px 0; font-size: 0.9em; }
+    </style>
+</head>
+<body>
+
+<h1>ThreadMeister &mdash; Heat-Set Insert Holes</h1>
+
+<p>ThreadMeister automates the creation of heat-set insert holes in Fusion 360 using CNC Kitchen's tested insert dimensions.</p>
+
+<h2>Quick Start</h2>
+<ol>
+    <li>Create a sketch and place <strong>sketch points</strong> where insert holes should go.</li>
+    <li>Finish the sketch.</li>
+    <li>Open <strong>SOLID &rarr; MODIFY &rarr; ThreadMeister</strong>.</li>
+    <li>Select the <strong>target body</strong>.</li>
+    <li>Select one or more <strong>sketch points</strong>.</li>
+    <li>Choose insert size and hole type (blind or through).</li>
+    <li>Enable/disable <strong>chamfer</strong> and <strong>bottom fillet</strong> (both recommended).</li>
+    <li>Click <strong>OK</strong>.</li>
+</ol>
+
+<h2>Insert Specifications</h2>
+<table>
+    <tr><th>Insert Size</th><th>Hole &empty;</th><th>Length</th></tr>
+    <tr><td>M2 x 3mm</td><td>3.2mm</td><td>3.0mm</td></tr>
+    <tr><td>M2.5 x 4mm</td><td>4.0mm</td><td>4.0mm</td></tr>
+    <tr><td>M3 x 3mm (short)</td><td>4.4mm</td><td>3.0mm</td></tr>
+    <tr><td>M3 x 4mm (short)</td><td>4.4mm</td><td>4.0mm</td></tr>
+    <tr><td>M3 x 5.7mm (standard)</td><td>4.4mm</td><td>5.7mm</td></tr>
+    <tr><td>M4 x 4mm (short)</td><td>5.6mm</td><td>4.0mm</td></tr>
+    <tr><td>M4 x 8.1mm (standard)</td><td>5.6mm</td><td>8.1mm</td></tr>
+    <tr><td>M5 x 5.8mm (short)</td><td>6.4mm</td><td>5.8mm</td></tr>
+    <tr><td>M5 x 9.5mm (standard)</td><td>6.4mm</td><td>9.5mm</td></tr>
+    <tr><td>M6 x 12.7mm</td><td>8.0mm</td><td>12.7mm</td></tr>
+    <tr><td>M8 x 12.7mm</td><td>9.7mm</td><td>12.7mm</td></tr>
+    <tr><td>M10 x 12.7mm</td><td>12.0mm</td><td>12.7mm</td></tr>
+    <tr><td>1/4"-20 x 12.7mm</td><td>8.0mm</td><td>12.7mm</td></tr>
+</table>
+
+<h2>Chamfer &amp; Depth</h2>
+<p>The top chamfer (default 0.5 mm &times; 45&deg;) cuts into the bore, reducing usable depth for the insert. The <code>blind_hole_extra_depth</code> setting (default 1.0 mm) compensates for this and provides clearance below the insert.</p>
+
+<div class="note">
+    <strong>Default:</strong> 1.0 mm extra depth &minus; 0.5 mm chamfer = 0.5 mm clearance below the insert.
+</div>
+
+<h2>Configuration</h2>
+<p>Edit <code>config.ini</code> in the add-in folder to customize chamfer size, extra depth, bottom fillet radius, and insert definitions. Custom inserts can be added in the <code>[Inserts]</code> section.</p>
+
+<h2>Support</h2>
+<p>Report issues or request features at:<br>
+<a href="https://github.com/AndreasOKircher/ThreadMeister/issues">github.com/AndreasOKircher/ThreadMeister</a></p>
+
+</body>
+</html>

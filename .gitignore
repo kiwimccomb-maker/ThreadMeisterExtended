@@ -22,8 +22,6 @@ env/
 
 #Appstore files
 dist/
-*.zip
-*.txt
 
 # Debug exports (generated at runtime)
 debug_exports/
