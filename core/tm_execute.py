@@ -2,6 +2,7 @@
 tm_execute.py – CommandExecuteHandler: orchestrates the hole creation loop.
 """
 import adsk.core, adsk.fusion, traceback, os
+import tm_helpers
 import tm_state
 import tm_config
 from tm_helpers import calc_blind_hole_depth_mm
@@ -9,7 +10,7 @@ from tm_geometry import (
     findProfileForCircle,
     findExtrudeDirectionFromSketch,
     findChamferEdge,
-    findGripRidgeChamferEdges,
+    getGripRidgeChamferEdges,
     addChamferToEdge,
     addAngleChamferToEdge,
     findDistanceThroughBody,
@@ -48,8 +49,10 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
             is_grip_ridge = insertName in tm_state.GRIP_RIDGE_INSERTS
 
             if is_grip_ridge:
-                clearanceDia, configDepth, minWall, nominalDia, gripEdgeChamfer = tm_state.GRIP_RIDGE_INSERTS[insertName]
-                # Use spinner value if present and visible, otherwise config default
+                clearanceDia, configInsertLen, minWall, nominalDia, gripEdgeChamfer = tm_state.GRIP_RIDGE_INSERTS[insertName]
+                # Pre-calculate the default total depth (insert + extra + chamfer)
+                configDepth = configInsertLen + tm_state.CONFIG['blind_hole_extra_depth'] + tm_state.CONFIG['chamfer_size']
+                # Use spinner value if present and visible, otherwise calculated default
                 if gripEdgeDepthInput is not None and gripEdgeDepthInput.isVisible:
                     insertLen = gripEdgeDepthInput.value
                 else:
@@ -121,12 +124,24 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                         export_dir = os.path.join(
                             os.path.dirname(os.path.dirname(__file__)), 'debug_exports')
                         os.makedirs(export_dir, exist_ok=True)
-                        export_sketch_data(
-                            tempSketch, circle, export_dir,
-                            description=f"Point {point_idx+1} - {insertName}"
-                        )
-                    except Exception:
-                        pass
+                        target_circle = None
+                        if is_grip_ridge:
+                            for circle_candidate in tempSketch.sketchCurves.sketchCircles:
+                                if circle_candidate.centerSketchPoint.geometry.distanceTo(projectedPoint.geometry) < 1e-6:
+                                    target_circle = circle_candidate
+                                    break
+                            if target_circle is None:
+                                tm_helpers.log(f'Grip-ridge debug export skipped: central circle not found for point {point_idx+1}')
+                        else:
+                            target_circle = circle
+
+                        if target_circle is not None:
+                            export_sketch_data(
+                                tempSketch, target_circle, export_dir,
+                                description=f"Point {point_idx+1} - {insertName}"
+                            )
+                    except Exception as e:
+                        tm_helpers.log(f'Debug export failed for point {point_idx+1}: {e}')
 
                 direction = findExtrudeDirectionFromSketch(parentSketch, center2d, targetBody)
 
@@ -140,9 +155,14 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                 extInput = extrudes.createInput(profile_or_collection, adsk.fusion.FeatureOperations.CutFeatureOperation)
 
                 if isBlindHole:
-                    chamfer = tm_state.CONFIG['chamfer_size'] if includeChamfer else 0.0
-                    depth_mm = calc_blind_hole_depth_mm(
-                        insertLen, tm_state.CONFIG['blind_hole_extra_depth'], chamfer)
+                    if is_grip_ridge:
+                        # Grip-ridge: spinner value IS the total hole depth in mm
+                        depth_mm = gripEdgeDepthInput.value if (gripEdgeDepthInput is not None and gripEdgeDepthInput.isVisible) else configDepth
+                    else:
+                        # Standard: insert length + extra depth + chamfer
+                        chamfer = tm_state.CONFIG['chamfer_size'] if includeChamfer else 0.0
+                        depth_mm = calc_blind_hole_depth_mm(
+                            insertLen, tm_state.CONFIG['blind_hole_extra_depth'], chamfer)
                     holeDepth = depth_mm / 10.0  # mm -> cm
                     dist = adsk.core.ValueInput.createByReal(holeDepth)
                     extent = adsk.fusion.DistanceExtentDefinition.create(dist)
@@ -158,14 +178,14 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
 
                 if includeChamfer:
                     if is_grip_ridge:
-                        # Grip-ridge: chamfer the 3 grip-ridge arc edges only
+                        # Grip-ridge: chamfer all edges on the top face of the extrude
                         grip_chamfer_angle = tm_state.CONFIG.get('grip_chamfer_angle', 60)
-                        gripEdges = findGripRidgeChamferEdges(
-                            extrude, targetBody, parentSketch, center2d, nominalDia)
-                        for gripEdge in gripEdges:
-                            addAngleChamferToEdge(
-                                component, gripEdge,
-                                tm_state.CONFIG['chamfer_size'], grip_chamfer_angle)
+                        gripEdges = getGripRidgeChamferEdges(extrude)
+                        if gripEdges and gripEdges.count > 0:
+                            for i in range(gripEdges.count):
+                                addAngleChamferToEdge(
+                                    component, gripEdges.item(i),
+                                    tm_state.CONFIG['chamfer_size'], grip_chamfer_angle)
                     else:
                         # Standard: single 45° equal-distance chamfer
                         chamferEdge = findChamferEdge(extrude, targetBody, parentSketch, center2d, diameter)
@@ -186,8 +206,8 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                     if endIndex >= startIndex:
                         timelineGroup = timeline.timelineGroups.add(startIndex, endIndex)
                         timelineGroup.name = f'({successCount}x {insertName})'
-                except Exception:
-                    pass
+                except Exception as e:
+                    tm_helpers.log(f'Timeline grouping failed: {e}')
 
             if failedCount > 0:
                 details = '\n'.join(failMessages)

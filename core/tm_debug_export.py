@@ -13,6 +13,7 @@ import time
 import math
 import adsk.core
 import adsk.fusion
+import tm_helpers
 from tm_geometry import findProfileForCircle
 
 
@@ -26,7 +27,13 @@ def _debug_log(msg):
             p.isVisible = True
         p.writeText(str(msg))
     except Exception:
-        pass
+        try:
+            tm_helpers.log(f"[EXPORT] {msg}")
+        except Exception:
+            try:
+                print(f"[EXPORT] {msg}")
+            except Exception:
+                pass
 
 
 def _clear_debug_log():
@@ -41,7 +48,13 @@ def _clear_debug_log():
             if not p.isVisible:
                 p.isVisible = True
     except Exception:
-        pass
+        try:
+            tm_helpers.log('[EXPORT] Could not clear debug log.')
+        except Exception:
+            try:
+                print('[EXPORT] Could not clear debug log.')
+            except Exception:
+                pass
 
 
 def export_sketch_data(sketch, target_circle, output_dir, description=""):

@@ -5,13 +5,49 @@ Unit tests for tm_geometry.py filter functions.
 import pytest
 import math
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, PropertyMock
+import adsk
 from tm_geometry import (
     _filter_by_area,
     _filter_by_centroid,
     _filter_by_bounding_box,
-    _accumulate_profiles
+    _filter_by_curve_points,
+    _accumulate_profiles,
+    getGripRidgeChamferEdges,
+    addAngleChamferToEdge,
 )
+
+
+# Fake sketch entity classes for isinstance() checks in tm_geometry
+class FakeSketchLine:
+    pass
+
+
+class FakeSketchArc:
+    pass
+
+
+class FakeSketchCircle:
+    pass
+
+
+class FakeSketchEllipticalArc:
+    pass
+
+
+class FakeSketchEllipse:
+    pass
+
+
+def _register_fake_sketch_types():
+    adsk.fusion.SketchLine = FakeSketchLine
+    adsk.fusion.SketchArc = FakeSketchArc
+    adsk.fusion.SketchCircle = FakeSketchCircle
+    adsk.fusion.SketchEllipticalArc = FakeSketchEllipticalArc
+    adsk.fusion.SketchEllipse = FakeSketchEllipse
+
+
+_register_fake_sketch_types()
 
 
 # Helper functions to create mock objects
@@ -192,6 +228,244 @@ class TestFilterByCentroid:
         assert profile3 not in [p for p, _, _ in result]
 
 
+# Helpers for curve point filter tests
+
+def make_sketch_point(x, y, z=0.0):
+    point = SimpleNamespace(x=x, y=y, z=z)
+    point.distanceTo = lambda other: math.sqrt(
+        (point.x - other.x)**2 +
+        (point.y - other.y)**2 +
+        (point.z - other.z)**2
+    )
+    return point
+
+
+def make_sketch_line(start, end, is_construction=False, is_reference=False):
+    sketch_entity = FakeSketchLine()
+    sketch_entity.isConstruction = is_construction
+    sketch_entity.isReference = is_reference
+    sketch_entity.startSketchPoint = SimpleNamespace(geometry=start)
+    sketch_entity.endSketchPoint = SimpleNamespace(geometry=end)
+    profile_curve = MagicMock()
+    profile_curve.sketchEntity = sketch_entity
+    return profile_curve
+
+
+def make_sketch_circle(center, is_construction=False, is_reference=False):
+    sketch_entity = FakeSketchCircle()
+    sketch_entity.isConstruction = is_construction
+    sketch_entity.isReference = is_reference
+    sketch_entity.centerSketchPoint = SimpleNamespace(geometry=center)
+    profile_curve = MagicMock()
+    profile_curve.sketchEntity = sketch_entity
+    return profile_curve
+
+
+class SimpleObjectCollection:
+    def __init__(self):
+        self._items = []
+
+    def add(self, item):
+        self._items.append(item)
+
+    @property
+    def count(self):
+        return len(self._items)
+
+    def item(self, index):
+        return self._items[index]
+
+    def __iter__(self):
+        return iter(self._items)
+
+
+class FakeGeometry:
+    def __init__(self, surfaceType=None, curveType=None):
+        self.surfaceType = surfaceType
+        self.curveType = curveType
+
+
+class FakeEdge:
+    def __init__(self, curveType, length=1.0):
+        self.geometry = FakeGeometry(curveType=curveType)
+        self.length = length
+
+
+class FakeFace:
+    def __init__(self, surfaceType, edges):
+        self.geometry = FakeGeometry(surfaceType=surfaceType)
+        self.edges = edges
+
+
+class FakeStartFaces:
+    def __init__(self, faces):
+        self._faces = faces
+
+    @property
+    def count(self):
+        return len(self._faces)
+
+    def item(self, index):
+        return self._faces[index]
+
+
+class TestFilterByCurvePoints:
+    """Test _filter_by_curve_points function."""
+
+    def test_profile_all_endpoints_inside_accepts(self):
+        circle_center = make_point(0.0, 0.0, 0.0)
+        circle_radius = 1.0
+        acceptance_radius = circle_radius * 1.05
+
+        start = make_sketch_point(0.5, 0.0)
+        end = make_sketch_point(0.0, 0.5)
+        profile = make_profile(area=1.0, centroid_x=0.0, centroid_y=0.0)
+        loop = MagicMock()
+        loop.profileCurves = [make_sketch_line(start, end)]
+        profile.profileLoops = [loop]
+
+        candidates = [(profile, 1.0, 0.0)]
+
+        result = _filter_by_curve_points(candidates, circle_center, circle_radius)
+
+        assert len(result) == 1
+        assert result[0][0] == profile
+
+    def test_getGripRidgeChamferEdges_prefers_start_faces(self):
+        outer_edge = FakeEdge(curveType='Circle3DCurveType', length=2.0)
+        inner_edge = FakeEdge(curveType='Circle3DCurveType', length=2.0)
+        start_face = FakeFace(surfaceType='PlaneSurfaceType', edges=[outer_edge])
+        other_face = FakeFace(surfaceType='PlaneSurfaceType', edges=[inner_edge])
+
+        extrude = MagicMock()
+        extrude.startFaces = FakeStartFaces([start_face])
+        extrude.faces = [start_face, other_face]
+
+        edges = getGripRidgeChamferEdges(extrude)
+
+        assert edges is not None
+        assert edges.count == 1
+        assert edges.item(0) is outer_edge
+
+    def test_getGripRidgeChamferEdges_falls_back_to_planar_faces(self):
+        outer_edge = FakeEdge(curveType='Circle3DCurveType', length=2.0)
+        inner_edge = FakeEdge(curveType='Circle3DCurveType', length=2.0)
+        face1 = FakeFace(surfaceType='PlaneSurfaceType', edges=[outer_edge])
+        face2 = FakeFace(surfaceType='PlaneSurfaceType', edges=[inner_edge])
+
+        extrude = MagicMock()
+        extrude.startFaces = None
+        extrude.faces = [face1, face2]
+
+        edges = getGripRidgeChamferEdges(extrude)
+
+        assert edges is not None
+        assert edges.count == 2
+        assert set(edges._items) == {outer_edge, inner_edge}
+
+    def test_addAngleChamferToEdge_sets_distance_and_angle(self, monkeypatch):
+        edge = FakeEdge(curveType='Circle3DCurveType', length=2.0)
+        component = MagicMock()
+        chamfer_features = MagicMock()
+        component.features.chamferFeatures = chamfer_features
+
+        chamfer_input = MagicMock()
+        chamfer_output = MagicMock()
+        chamfer_features.createInput.return_value = chamfer_input
+        chamfer_features.add.return_value = chamfer_output
+
+        created_values = []
+
+        def create_by_real(value):
+            created_values.append(value)
+            return f'ValueInput({value})'
+
+        monkeypatch.setattr('adsk.core.ValueInput.createByReal', create_by_real)
+
+        result = addAngleChamferToEdge(component, edge, 0.5, 60)
+
+        assert result is chamfer_output
+        assert chamfer_features.createInput.called
+        assert chamfer_input.setToDistanceAndAngle.called
+        assert created_values[0] == 0.05
+        assert math.isclose(created_values[1], math.radians(60), rel_tol=1e-9)
+
+    def test_profile_endpoint_outside_rejects(self):
+        circle_center = make_point(0.0, 0.0, 0.0)
+        circle_radius = 1.0
+
+        start = make_sketch_point(0.5, 0.0)
+        end = make_sketch_point(1.2, 0.0)
+        profile = make_profile(area=1.0, centroid_x=0.0, centroid_y=0.0)
+        loop = MagicMock()
+        loop.profileCurves = [make_sketch_line(start, end)]
+        profile.profileLoops = [loop]
+
+        candidates = [(profile, 1.0, 0.0)]
+
+        result = _filter_by_curve_points(candidates, circle_center, circle_radius)
+
+        assert len(result) == 0
+
+    def test_profile_only_construction_falls_back_to_centroid(self):
+        circle_center = make_point(0.0, 0.0, 0.0)
+        circle_radius = 1.0
+
+        circle_center_point = make_sketch_point(0.0, 0.0)
+        profile = make_profile(area=1.0, centroid_x=0.0, centroid_y=0.0)
+        loop = MagicMock()
+        loop.profileCurves = [make_sketch_circle(circle_center_point, is_construction=True)]
+        profile.profileLoops = [loop]
+
+        candidates = [(profile, 1.0, 0.0)]
+
+        result = _filter_by_curve_points(candidates, circle_center, circle_radius)
+
+        assert len(result) == 1
+        assert result[0][0] == profile
+
+    def test_unsupported_sketch_entity_type_is_accepted(self):
+        circle_center = make_point(0.0, 0.0, 0.0)
+        circle_radius = 1.0
+
+        class UnknownSketchEntity:
+            pass
+
+        sketch_entity = UnknownSketchEntity()
+        sketch_entity.isConstruction = False
+        sketch_entity.isReference = False
+        profile_curve = MagicMock()
+        profile_curve.sketchEntity = sketch_entity
+
+        profile = make_profile(area=1.0, centroid_x=0.0, centroid_y=0.0)
+        loop = MagicMock()
+        loop.profileCurves = [profile_curve]
+        profile.profileLoops = [loop]
+
+        candidates = [(profile, 1.0, 0.0)]
+
+        result = _filter_by_curve_points(candidates, circle_center, circle_radius)
+
+        assert len(result) == 1
+        assert result[0][0] == profile
+
+    def test_error_in_curve_iteration_falls_back_to_centroid(self):
+        circle_center = make_point(0.0, 0.0, 0.0)
+        circle_radius = 1.0
+
+        profile = make_profile(area=1.0, centroid_x=0.0, centroid_y=0.0)
+        bad_loop = MagicMock()
+        bad_loop.profileCurves = PropertyMock(side_effect=Exception('bad curve list'))
+        profile.profileLoops = [bad_loop]
+
+        candidates = [(profile, 1.0, 0.0)]
+
+        result = _filter_by_curve_points(candidates, circle_center, circle_radius)
+
+        assert len(result) == 1
+        assert result[0][0] == profile
+
+
 class TestFilterByBoundingBox:
     """Test _filter_by_bounding_box function."""
 
@@ -212,6 +486,60 @@ class TestFilterByBoundingBox:
         result = _filter_by_bounding_box(candidates, circle_center, circle_radius)
 
         assert len(result) == 1
+
+    def test_bbox_outside_left_boundary(self):
+        """Bbox extending past left boundary should be excluded."""
+        circle_center = make_point(0.0, 0.0, 0.0)
+        circle_radius = 10.0
+
+        # Min bound: center.x - 2*radius = -20.0
+        profile = make_profile(
+            area=10.0,
+            bbox_min_x=-21.0, bbox_min_y=-5.0,
+            bbox_max_x=5.0, bbox_max_y=5.0
+        )
+        candidates = [(profile, 10.0, 1.0)]
+
+        result = _filter_by_bounding_box(candidates, circle_center, circle_radius)
+
+        assert len(result) == 0
+
+    def test_bbox_outside_right_boundary(self):
+        """Bbox extending past right boundary should be excluded."""
+        circle_center = make_point(0.0, 0.0, 0.0)
+        circle_radius = 10.0
+
+        # Max bound: center.x + 2*radius = 20.0
+        profile = make_profile(
+            area=10.0,
+            bbox_min_x=-5.0, bbox_min_y=-5.0,
+            bbox_max_x=21.0, bbox_max_y=5.0
+        )
+        candidates = [(profile, 10.0, 1.0)]
+
+        result = _filter_by_bounding_box(candidates, circle_center, circle_radius)
+
+        assert len(result) == 0
+
+    def test_bbox_outside_top_boundary(self):
+        """Bbox extending past top boundary should be excluded."""
+        circle_center = make_point(0.0, 0.0, 0.0)
+        circle_radius = 10.0
+
+        profile = make_profile(
+            area=10.0,
+            bbox_min_x=-5.0, bbox_min_y=-5.0,
+            bbox_max_x=5.0, bbox_max_y=21.0
+        )
+        candidates = [(profile, 10.0, 1.0)]
+
+        result = _filter_by_bounding_box(candidates, circle_center, circle_radius)
+
+        assert len(result) == 0
+
+
+class TestAccumulateProfiles:
+    """Test _accumulate_profiles function."""
 
     def test_bbox_outside_left_boundary(self):
         """Bbox extending past left boundary should be excluded."""

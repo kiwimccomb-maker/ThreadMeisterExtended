@@ -76,8 +76,12 @@ CONFIG = {
 _handlers = []
 
 # Fusion 360 application and UI handles
-_app = adsk.core.Application.get()
-_ui = _app.userInterface
+try:
+    _app = adsk.core.Application.get()
+    _ui = _app.userInterface
+except Exception:
+    _app = None
+    _ui = None
 
 # Command identity
 CMD_ID = 'ThreadMeisterCmd'

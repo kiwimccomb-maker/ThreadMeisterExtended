@@ -68,7 +68,10 @@ def log(msg):
             p.isVisible = True
         p.writeText(str(msg))
     except Exception:
-        pass
+        try:
+            print(str(msg))
+        except Exception:
+            pass
 
 
 def clear_log():

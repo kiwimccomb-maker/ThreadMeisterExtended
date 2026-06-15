@@ -5,6 +5,7 @@ Handles CommandCreated, InputChanged, ValidateInputs events and
 the updateInfoText helper that refreshes the info text box.
 """
 import adsk.core, adsk.fusion, traceback
+import tm_helpers
 import tm_state
 import tm_config
 from tm_helpers import calc_blind_hole_depth_mm
@@ -79,11 +80,16 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             holeTypeGroup.listItems.add('Through Hole', not saved_is_blind)
 
             # Grip-edge depth override (hidden unless a grip-ridge insert is selected)
-            _, insertLen_default, _, _, _ = tm_state.GRIP_RIDGE_INSERTS.get(
+            # Default value is the FULL calculated hole depth (insert + extra + chamfer)
+            # so the user sees and controls the actual hole depth directly.
+            _, configInsertLen, _, _, _ = tm_state.GRIP_RIDGE_INSERTS.get(
                 lastSelected, (0, 7.0, 0, 0, 0))
             isGripDefault = lastSelected in tm_state.GRIP_RIDGE_INSERTS
+            defaultTotalDepth = (configInsertLen
+                                 + tm_state.CONFIG['blind_hole_extra_depth']
+                                 + tm_state.CONFIG['chamfer_size'])
             inputs.addFloatSpinnerCommandInput(
-                'gripEdgeDepth', 'Hole Depth (mm)', 'mm', 0.1, 100.0, insertLen_default, 1)
+                'gripEdgeDepth', 'Hole Depth (mm)', 'mm', 0.1, 100.0, defaultTotalDepth, 1)
             depthInput = inputs.itemById('gripEdgeDepth')
             depthInput.isVisible = isGripDefault
 
@@ -137,8 +143,11 @@ class InputChangedHandler(adsk.core.InputChangedEventHandler):
                 if depthInput:
                     depthInput.isVisible = isGrip
                     if isGrip:
-                        _, insertLen, _, _, _ = tm_state.GRIP_RIDGE_INSERTS[insertName]
-                        depthInput.value = insertLen
+                        _, configInsertLen, _, _, _ = tm_state.GRIP_RIDGE_INSERTS[insertName]
+                        totalDepth = (configInsertLen
+                                      + tm_state.CONFIG['blind_hole_extra_depth']
+                                      + tm_state.CONFIG['chamfer_size'])
+                        depthInput.value = totalDepth
 
             if changedInput.id in ('insertSize', 'holeType', 'addChamfer', 'gripEdgeDepth'):
                 updateInfoText(inputs)
@@ -176,23 +185,28 @@ def updateInfoText(inputs):
         is_grip_ridge = insertName in tm_state.GRIP_RIDGE_INSERTS
 
         if is_grip_ridge:
-            clearanceDia, configDepth, minWall, nominalDia, gripEdgeChamfer = tm_state.GRIP_RIDGE_INSERTS[insertName]
+            clearanceDia, configInsertLen, minWall, nominalDia, gripEdgeChamfer = tm_state.GRIP_RIDGE_INSERTS[insertName]
             holeDia = clearanceDia
             arc_dia = 0.5 * nominalDia
 
-            # Use spinner value if visible, otherwise config default
+            # Use spinner value if visible (it's the total hole depth),
+            # otherwise fall back to the calculated default
             depthInput = inputs.itemById('gripEdgeDepth')
             if depthInput and depthInput.isVisible:
-                insertLen = depthInput.value
+                totalDepth = depthInput.value
             else:
-                insertLen = configDepth
+                totalDepth = (configInsertLen
+                              + tm_state.CONFIG['blind_hole_extra_depth']
+                              + tm_state.CONFIG['chamfer_size'])
         else:
             holeDia, insertLen, minWall = tm_state.INSERT_SPECS[insertName]
 
         addChamfer = inputs.itemById('addChamfer')
         chamferOn = addChamfer.value if addChamfer else False
 
-        if isBlindHole:
+        if is_grip_ridge:
+            depthStr = f'{totalDepth:.1f} mm' if isBlindHole else 'Through body'
+        elif isBlindHole:
             extra = tm_state.CONFIG['blind_hole_extra_depth']
             chamfer = tm_state.CONFIG['chamfer_size'] if chamferOn else 0.0
             holeDepth = calc_blind_hole_depth_mm(insertLen, extra, chamfer)
@@ -207,7 +221,7 @@ def updateInfoText(inputs):
             grip_chamfer_angle = tm_state.CONFIG.get('grip_chamfer_angle', 60)
             chamfer_info = f'{tm_state.CONFIG["chamfer_size"]}mm @ {grip_chamfer_angle}°' if chamferOn else 'Off'
             info = (f'<b>{insertName}</b><br/>' +
-                    f'Hole: {holeDia:.1f} mm  ·  Depth: {insertLen:.1f} mm<br/>' +
+                    f'Hole: {holeDia:.1f} mm  ·  Depth: {totalDepth:.1f} mm<br/>' +
                     f'Ridges: 3× Ø{arc_dia:.1f} mm  ·  Grip chamfer: {gripEdgeChamfer} mm<br/>' +
                     f'Chamfer: {chamfer_info}<br/>' +
                     f'Hole depth: {depthStr}<br/>' +
@@ -221,4 +235,4 @@ def updateInfoText(inputs):
         infoText.formattedText = info
 
     except Exception:
-        pass
+        tm_helpers.log('updateInfoText failed: {}'.format(traceback.format_exc()))

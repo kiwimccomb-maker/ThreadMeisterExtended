@@ -13,20 +13,35 @@ from unittest.mock import MagicMock
 adsk_mock = MagicMock()
 adsk_mock.core.Application.get.return_value = MagicMock()
 adsk_mock.fusion.CalculationAccuracy.MediumCalculationAccuracy = MagicMock()
+adsk_mock.core.SurfaceTypes = MagicMock()
+adsk_mock.core.SurfaceTypes.PlaneSurfaceType = 'PlaneSurfaceType'
+adsk_mock.core.Curve3DTypes = MagicMock()
+adsk_mock.core.Curve3DTypes.Circle3DCurveType = 'Circle3DCurveType'
 
-# Mock ObjectCollection to be iterable
+# Mock ObjectCollection to be iterable and countable
 def create_object_collection():
-    """Create a mock ObjectCollection that supports iteration."""
-    coll = MagicMock()
-    coll._items = []
+    """Create a mock ObjectCollection that supports iteration and count."""
+    class MockObjectCollection:
+        def __init__(self):
+            self._items = []
 
-    def add(item):
-        coll._items.append(item)
+        def add(self, item):
+            self._items.append(item)
 
-    coll.add = add
-    coll.__iter__ = lambda self: iter(coll._items)
+        @property
+        def count(self):
+            return len(self._items)
 
-    return coll
+        def item(self, index):
+            return self._items[index]
+
+        def __iter__(self):
+            return iter(self._items)
+
+        def __len__(self):
+            return len(self._items)
+
+    return MockObjectCollection()
 
 adsk_mock.core.ObjectCollection.create = create_object_collection
 

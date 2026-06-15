@@ -5,6 +5,7 @@ chamfer, fillet, through-body distance, and grip-ridge sketch generation.
 import adsk.core, adsk.fusion, traceback
 import math
 from itertools import combinations
+import tm_helpers
 import tm_state
 
 # Profile point margin: profiles must have ALL endpoints within circle_radius * (1 + this margin)
@@ -127,6 +128,7 @@ def _filter_by_curve_points(candidates, circle_center3d, circle_radius):
                     break
 
         except Exception:
+            tm_helpers.log('Error in _filter_by_curve_points: {}'.format(traceback.format_exc()))
             has_non_construction = False
 
         if not has_non_construction:
@@ -335,8 +337,10 @@ def findExtrudeDirectionFromSketch(sketch, circleCenter, targetBody):
             return None
 
     except Exception:
+        msg = 'Error in findExtrudeDirectionFromSketch:\n{}'.format(traceback.format_exc())
+        tm_helpers.log(msg)
         if tm_state._ui:
-            tm_state._ui.messageBox('Error in findExtrudeDirectionFromSketch:\n{}'.format(traceback.format_exc()))
+            tm_state._ui.messageBox(msg)
         return None
 
 
@@ -391,96 +395,68 @@ def findChamferEdge(extrudeFeature, targetBody, sketch, circleCenter, holeDiamet
         return None
 
     except Exception:
+        msg = 'Error in findChamferEdge:\n{}'.format(traceback.format_exc())
+        tm_helpers.log(msg)
         if tm_state._ui:
-            tm_state._ui.messageBox('Error in findChamferEdge:\n{}'.format(traceback.format_exc()))
+            tm_state._ui.messageBox(msg)
         return None
 
 
-def findGripRidgeChamferEdges(extrudeFeature, targetBody, sketch, circleCenter, nominalDiaMm):
+def getGripRidgeChamferEdges(extrudeFeature):
     """
-    Find the circular edges of the grip-ridge arcs at the hole entrance for chamfering.
+    Get the top edges of a grip-ridge extrude for chamfering.
 
-    Unlike the clearance circle (which is centred on the hole), the 3 grip-ridge
-    arc circles are offset at 0°, 120°, 240° at a distance of 0.6 * nominal_dia
-    from the centre. Each has radius = 0.5 * nominal_dia / 2.
-
-    This function searches ALL circular edges on the body near the sketch plane
-    and returns those matching the grip-ridge arc radius.
+    The grip-ridge profile is a union of overlapping circles (clearance + 3 arcs).
+    After extrusion, Fusion does NOT produce separate Circle3D edges for each arc --
+    it produces a single composite boundary. So we get the edges directly from
+    the extrude feature's start face (the face at the sketch plane).
 
     Args:
-        extrudeFeature: The extrude feature that created the hole
-        targetBody: The body being cut
-        sketch: The parent sketch (for plane/orientation)
-        circleCenter: 2D centre point of the hole in sketch space
-        nominalDiaMm: Nominal thread diameter in mm (used to compute arc radius)
+        extrudeFeature: The extrude feature that created the grip-ridge hole
 
     Returns:
-        List of circular edges to chamfer (may be 0-3 edges)
+        adsk.core.ObjectCollection of edges on the start face of the extrude,
+        or None if not found.
     """
     try:
-        sketchTransform = sketch.transform
-        center3DSketch = adsk.core.Point3D.create(circleCenter.x, circleCenter.y, 0)
-        center3D = center3DSketch.copy()
-        center3D.transformBy(sketchTransform)
+        edges = adsk.core.ObjectCollection.create()
 
-        (origin, xAxis, yAxis, zAxis) = sketchTransform.getAsCoordinateSystem()
+        start_faces = getattr(extrudeFeature, 'startFaces', None)
+        candidate_faces = []
+        if start_faces is not None and getattr(start_faces, 'count', 0) > 0:
+            for i in range(start_faces.count):
+                candidate_faces.append(start_faces.item(i))
+        else:
+            for face in extrudeFeature.faces:
+                if face.geometry.surfaceType == adsk.core.SurfaceTypes.PlaneSurfaceType:
+                    candidate_faces.append(face)
 
-        # Grip-ridge arc circle radius (same as in create_grip_ridge_sketch)
-        arc_radius_mm = 0.5 * nominalDiaMm / 2.0
-        expectedRadius = arc_radius_mm / 10.0  # mm → cm
+        seen_edge_ids = set()
+        for face in candidate_faces:
+            for edge in face.edges:
+                edge_id = id(edge)
+                if edge_id in seen_edge_ids:
+                    continue
+                seen_edge_ids.add(edge_id)
 
-        # Max distance from hole centre that a grip-ridge arc centre can be
-        arc_center_dist_mm = 0.6 * nominalDiaMm
-        max_center_dist = (arc_center_dist_mm + arc_radius_mm) / 10.0  # mm → cm, generous bound
+                if not hasattr(edge, 'geometry') or not hasattr(edge.geometry, 'curveType'):
+                    continue
 
-        candidateEdges = []
+                edge_length = getattr(edge, 'length', None)
+                if edge_length is not None and edge_length < 0.01:
+                    continue
 
-        for edge in targetBody.edges:
-            if edge.geometry.curveType != adsk.core.Curve3DTypes.Circle3DCurveType:
-                continue
+                edges.add(edge)
 
-            edgeCircle = edge.geometry
-            edgeCenter = edgeCircle.center
-            edgeRadius = edgeCircle.radius
-            edgeNormal = edgeCircle.normal
-
-            # Match radius (grip-ridge arc radius)
-            if abs(edgeRadius - expectedRadius) > 0.001:
-                continue
-
-            # Normal must be parallel to sketch plane normal
-            dotProduct = abs(edgeNormal.x * zAxis.x + edgeNormal.y * zAxis.y + edgeNormal.z * zAxis.z)
-            if dotProduct < 0.99:
-                continue
-
-            # Edge centre must be near the sketch plane
-            vecToEdge = adsk.core.Vector3D.create(
-                edgeCenter.x - center3D.x,
-                edgeCenter.y - center3D.y,
-                edgeCenter.z - center3D.z
-            )
-            projection = vecToEdge.x * zAxis.x + vecToEdge.y * zAxis.y + vecToEdge.z * zAxis.z
-            perpDist = vecToEdge.length - abs(projection)
-            if perpDist > 0.01:
-                continue
-
-            # Edge centre must be within the grip-ridge zone (offset from hole centre)
-            distFromCenter = vecToEdge.length
-            if distFromCenter > max_center_dist:
-                continue
-
-            candidateEdges.append((edge, abs(projection)))
-
-        if len(candidateEdges) > 0:
-            candidateEdges.sort(key=lambda x: x[1])
-            return [edge for edge, _ in candidateEdges]
-
-        return []
-
+        if getattr(edges, 'count', 0) > 0:
+            return edges
+        return None
     except Exception:
+        msg = 'Error in getGripRidgeChamferEdges:\n{}'.format(traceback.format_exc())
+        tm_helpers.log(msg)
         if tm_state._ui:
-            tm_state._ui.messageBox('Error in findGripRidgeChamferEdges:\n{}'.format(traceback.format_exc()))
-        return []
+            tm_state._ui.messageBox(msg)
+        return None
 
 
 def addChamferToEdge(component, edge, chamferSize):
@@ -500,8 +476,10 @@ def addChamferToEdge(component, edge, chamferSize):
         chamfer = chamfers.add(chamferInput)
         return chamfer
     except Exception:
+        msg = 'Error in addChamferToEdge:\n{}'.format(traceback.format_exc())
+        tm_helpers.log(msg)
         if tm_state._ui:
-            tm_state._ui.messageBox('Error in addChamferToEdge:\n{}'.format(traceback.format_exc()))
+            tm_state._ui.messageBox(msg)
         return None
 
 
@@ -530,8 +508,10 @@ def addAngleChamferToEdge(component, edge, chamferSize, angleDeg):
         chamfer = chamfers.add(chamferInput)
         return chamfer
     except Exception:
+        msg = 'Error in addAngleChamferToEdge:\n{}'.format(traceback.format_exc())
+        tm_helpers.log(msg)
         if tm_state._ui:
-            tm_state._ui.messageBox('Error in addAngleChamferToEdge:\n{}'.format(traceback.format_exc()))
+            tm_state._ui.messageBox(msg)
         return None
 
 
@@ -578,8 +558,10 @@ def findDistanceThroughBody(sketch, circleCenter, targetBody, direction):
         return 10.0
 
     except Exception:
+        msg = 'Error in findDistanceThroughBody:\n{}'.format(traceback.format_exc())
+        tm_helpers.log(msg)
         if tm_state._ui:
-            tm_state._ui.messageBox('Error in findDistanceThroughBody:\n{}'.format(traceback.format_exc()))
+            tm_state._ui.messageBox(msg)
         return 10.0
 
 
@@ -661,8 +643,10 @@ def addBottomRadiusToBlindHole(component, extrudeFeature, targetBody, sketch, ci
             return None
 
     except Exception:
+        msg = 'Error in addBottomRadiusToBlindHole:\n{}'.format(traceback.format_exc())
+        tm_helpers.log(msg)
         if tm_state._ui:
-            tm_state._ui.messageBox('Error in addBottomRadiusToBlindHole:\n{}'.format(traceback.format_exc()))
+            tm_state._ui.messageBox(msg)
         return None
 
 
@@ -727,7 +711,8 @@ def create_grip_ridge_sketch(sketch, center_point_2d, clearance_dia_mm, nominal_
         return best_profile
 
     except Exception:
+        msg = 'Error in create_grip_ridge_sketch:\n{}'.format(traceback.format_exc())
+        tm_helpers.log(msg)
         if tm_state._ui:
-            tm_state._ui.messageBox(
-                'Error in create_grip_ridge_sketch:\n{}'.format(traceback.format_exc()))
+            tm_state._ui.messageBox(msg)
         return None

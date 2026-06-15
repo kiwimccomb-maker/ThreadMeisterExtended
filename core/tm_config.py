@@ -6,12 +6,13 @@ Reads/writes config.ini. Mutates INSERT_SPECS and CONFIG in tm_state.
 Config sections:
   [Settings]         - Design parameters (chamfer_size, blind_hole_extra_depth, bottom_radius_size)
   [Inserts]          - Insert specifications (name = diameter, length, min_wall)
-  [GripRidgeInserts] - Grip-ridge insert specs (name = clearance_dia, depth, min_wall, nominal_dia)
+  [GripRidgeInserts] - Grip-ridge insert specs (name = clearance_dia, depth, min_wall, nominal_dia, [optional] grip_edge_chamfer)
   [UI State]         - Remembered menu state (chamfer_enabled_default, bottom_radius_enabled_default, etc.)
   [Developer]        - Debug flags (enable_logging, enable_debug_export)
 """
 import os
 import configparser
+import tm_helpers
 import tm_state
 
 
@@ -52,12 +53,13 @@ def _get(config, key, section_new, fallback, getter='get'):
     return fallback
 
 
-def load_config():
+def load_config(config_file=None):
     """Load configuration from config.ini with validation. Creates defaults if missing."""
-    config_file = _get_config_path()
+    if config_file is None:
+        config_file = _get_config_path()
 
     if not os.path.exists(config_file):
-        create_default_config()
+        create_default_config(config_file)
 
     errors = []
     warnings = []
@@ -222,6 +224,7 @@ def load_config():
                 tm_state._ui.messageBox(f'Config.ini issues:\n\n{msg}')
 
     except Exception as e:
+        tm_helpers.log(f'Error loading config.ini: {str(e)}')
         if tm_state._ui:
             tm_state._ui.messageBox(f'Error loading config.ini: {str(e)}\nUsing default specifications.')
         tm_state.INSERT_SPECS.update(get_default_inserts())
@@ -229,12 +232,12 @@ def load_config():
     return tm_state.INSERT_SPECS, tm_state.CONFIG
 
 
-def _migrate_config(config_file):
+def _migrate_config(config_file=None):
     """Rewrite config.ini from old single-section format to new multi-section format."""
     try:
         _write_config_file(config_file)
-    except Exception:
-        pass  # Migration failure is non-critical; old format still works
+    except Exception as e:
+        tm_helpers.log(f'Config migration failed: {e}')  # Migration failure is non-critical; old format still works
 
 
 def _write_config_file(config_file=None):
@@ -280,10 +283,11 @@ def _write_config_file(config_file=None):
         config.write(f)
 
 
-def save_last_selected_insert(insert_name):
+def save_last_selected_insert(insert_name, config_file=None):
     """Persist the last selected insert name to config.ini."""
     try:
-        config_file = _get_config_path()
+        if config_file is None:
+            config_file = _get_config_path()
         config = _read_config_file(config_file)
         section = 'UI State' if config.has_section('UI State') else 'Settings'
         if not config.has_section(section):
@@ -291,14 +295,15 @@ def save_last_selected_insert(insert_name):
         config.set(section, 'last_selected_insert', insert_name)
         with open(config_file, 'w', encoding='utf-8') as f:
             config.write(f)
-    except Exception:
-        pass
+    except Exception as e:
+        tm_helpers.log(f'Failed to save last selected insert: {e}')
 
 
-def save_checkbox_states(chamfer_state, radius_state, show_message_state, is_blind_hole):
+def save_checkbox_states(chamfer_state, radius_state, show_message_state, is_blind_hole, config_file=None):
     """Persist UI checkbox states and hole type to config.ini."""
     try:
-        config_file = _get_config_path()
+        if config_file is None:
+            config_file = _get_config_path()
         config = _read_config_file(config_file)
         section = 'UI State' if config.has_section('UI State') else 'Settings'
         if not config.has_section(section):
@@ -309,8 +314,8 @@ def save_checkbox_states(chamfer_state, radius_state, show_message_state, is_bli
         config.set(section, 'hole_type_blind', str(is_blind_hole))
         with open(config_file, 'w', encoding='utf-8') as f:
             config.write(f)
-    except Exception:
-        pass
+    except Exception as e:
+        tm_helpers.log(f'Failed to save checkbox states: {e}')
 
 
 def get_default_inserts():
@@ -347,9 +352,10 @@ def get_default_grip_ridge_inserts():
     }
 
 
-def create_default_config():
+def create_default_config(config_file=None):
     """Write a default config.ini file in the new multi-section format."""
-    config_file = _get_config_path()
+    if config_file is None:
+        config_file = _get_config_path()
     try:
         with open(config_file, 'w', encoding='utf-8') as f:
             f.write('[Settings]\n')
