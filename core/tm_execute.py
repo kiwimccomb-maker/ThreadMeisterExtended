@@ -178,14 +178,14 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
 
                 if includeChamfer:
                     if is_grip_ridge:
-                        # Grip-ridge: chamfer all edges on the top face of the extrude
+                        # Grip-ridge: chamfer arc ridge edges with per-insert chamfer size
                         grip_chamfer_angle = tm_state.CONFIG.get('grip_chamfer_angle', 60)
                         gripEdges = getGripRidgeChamferEdges(extrude)
                         if gripEdges and gripEdges.count > 0:
                             for i in range(gripEdges.count):
                                 addAngleChamferToEdge(
                                     component, gripEdges.item(i),
-                                    tm_state.CONFIG['chamfer_size'], grip_chamfer_angle)
+                                    gripEdgeChamfer, grip_chamfer_angle)
                     else:
                         # Standard: single 45° equal-distance chamfer
                         chamferEdge = findChamferEdge(extrude, targetBody, parentSketch, center2d, diameter)

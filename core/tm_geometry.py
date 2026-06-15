@@ -404,22 +404,24 @@ def findChamferEdge(extrudeFeature, targetBody, sketch, circleCenter, holeDiamet
 
 def getGripRidgeChamferEdges(extrudeFeature):
     """
-    Get the top edges of a grip-ridge extrude for chamfering.
+    Get the arc ridge edges for chamfering on a grip-ridge extrude.
 
-    The grip-ridge profile is a union of overlapping circles (clearance + 3 arcs).
-    After extrusion, Fusion does NOT produce separate Circle3D edges for each arc --
-    it produces a single composite boundary. So we get the edges directly from
-    the extrude feature's start face (the face at the sketch plane).
+    The grip-ridge profile is a union of:
+    - 1 clearance hole (outer boundary) - LARGEST edge
+    - 3 arc ridges (small circles at 120° intervals) - smaller edges
+
+    After extrusion, the top face has edges from both. This function returns
+    ONLY the arc ridge edges (smaller interior edges), excluding the clearance
+    hole boundary which should NOT be chamfered.
 
     Args:
         extrudeFeature: The extrude feature that created the grip-ridge hole
 
     Returns:
-        adsk.core.ObjectCollection of edges on the start face of the extrude,
-        or None if not found.
+        adsk.core.ObjectCollection of arc ridge edges, or None if not found.
     """
     try:
-        edges = adsk.core.ObjectCollection.create()
+        edges_by_length = []
 
         start_faces = getattr(extrudeFeature, 'startFaces', None)
         candidate_faces = []
@@ -443,13 +445,38 @@ def getGripRidgeChamferEdges(extrudeFeature):
                     continue
 
                 edge_length = getattr(edge, 'length', None)
-                if edge_length is not None and edge_length < 0.01:
+                if edge_length is None or edge_length < 0.01:
                     continue
 
-                edges.add(edge)
+                edges_by_length.append((edge, edge_length))
 
-        if getattr(edges, 'count', 0) > 0:
-            return edges
+        if not edges_by_length:
+            return None
+
+        # Sort by length descending
+        edges_by_length.sort(key=lambda x: x[1], reverse=True)
+
+        # The clearance hole boundary is the LARGEST edge.
+        # Arc ridges are significantly smaller (~1/3 the size or less).
+        # Skip the largest edge(s) and select only the smaller arc ridge edges.
+        result = adsk.core.ObjectCollection.create()
+
+        if len(edges_by_length) > 1:
+            # Exclude the largest (clearance hole)
+            arc_candidates = edges_by_length[1:]
+
+            # Filter: keep only edges that are close in size to each other
+            # (the 3 arc ridges should be roughly equal length)
+            if arc_candidates:
+                largest_arc_length = arc_candidates[0][1]
+                min_arc_threshold = largest_arc_length * 0.5
+
+                for edge, edge_length in arc_candidates:
+                    if edge_length >= min_arc_threshold:
+                        result.add(edge)
+
+        if getattr(result, 'count', 0) > 0:
+            return result
         return None
     except Exception:
         msg = 'Error in getGripRidgeChamferEdges:\n{}'.format(traceback.format_exc())
@@ -497,15 +524,29 @@ def addAngleChamferToEdge(component, edge, chamferSize, angleDeg):
         The chamfer feature, or None if failed
     """
     try:
+        if edge is None:
+            tm_helpers.log('addAngleChamferToEdge: edge is None')
+            return None
+
+        edge_length = getattr(edge, 'length', None)
+        edge_geom = getattr(edge, 'geometry', None)
+        edge_curve_type = getattr(edge_geom, 'curveType', None) if edge_geom else None
+
+        tm_helpers.log(f'addAngleChamferToEdge: chamferSize={chamferSize}mm, angle={angleDeg}°, edge_length={edge_length}cm, curve_type={edge_curve_type}')
+
         chamfers = component.features.chamferFeatures
         edges = adsk.core.ObjectCollection.create()
         edges.add(edge)
+
         chamferInput = chamfers.createInput(edges, True)
         chamferDistance = adsk.core.ValueInput.createByReal(chamferSize / 10.0)
         angleRad = math.radians(angleDeg)
         angleValue = adsk.core.ValueInput.createByReal(angleRad)
         chamferInput.setToDistanceAndAngle(chamferDistance, angleValue)
+
+        tm_helpers.log(f'addAngleChamferToEdge: created chamfer input, adding to component...')
         chamfer = chamfers.add(chamferInput)
+        tm_helpers.log(f'addAngleChamferToEdge: chamfer added successfully')
         return chamfer
     except Exception:
         msg = 'Error in addAngleChamferToEdge:\n{}'.format(traceback.format_exc())

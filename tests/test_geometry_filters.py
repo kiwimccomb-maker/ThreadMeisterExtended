@@ -331,37 +331,48 @@ class TestFilterByCurvePoints:
         assert len(result) == 1
         assert result[0][0] == profile
 
-    def test_getGripRidgeChamferEdges_prefers_start_faces(self):
-        outer_edge = FakeEdge(curveType='Circle3DCurveType', length=2.0)
-        inner_edge = FakeEdge(curveType='Circle3DCurveType', length=2.0)
-        start_face = FakeFace(surfaceType='PlaneSurfaceType', edges=[outer_edge])
-        other_face = FakeFace(surfaceType='PlaneSurfaceType', edges=[inner_edge])
+    def test_getGripRidgeChamferEdges_excludes_clearance_hole(self):
+        """Test that clearance hole boundary is excluded, only arc ridges are returned."""
+        # Clearance hole edge is largest
+        clearance_hole = FakeEdge(curveType='Circle3DCurveType', length=10.0)
+        # Arc ridge edges are smaller
+        arc_edge1 = FakeEdge(curveType='Circle3DCurveType', length=2.0)
+        arc_edge2 = FakeEdge(curveType='Circle3DCurveType', length=2.0)
+        arc_edge3 = FakeEdge(curveType='Circle3DCurveType', length=2.0)
+        start_face = FakeFace(surfaceType='PlaneSurfaceType', 
+                             edges=[clearance_hole, arc_edge1, arc_edge2, arc_edge3])
 
         extrude = MagicMock()
         extrude.startFaces = FakeStartFaces([start_face])
-        extrude.faces = [start_face, other_face]
+        extrude.faces = [start_face]
 
         edges = getGripRidgeChamferEdges(extrude)
 
+        # Should return only arc edges, excluding the clearance hole
         assert edges is not None
-        assert edges.count == 1
-        assert edges.item(0) is outer_edge
+        assert edges.count == 3
+        assert set(edges._items) == {arc_edge1, arc_edge2, arc_edge3}
+        assert clearance_hole not in edges._items
 
     def test_getGripRidgeChamferEdges_falls_back_to_planar_faces(self):
-        outer_edge = FakeEdge(curveType='Circle3DCurveType', length=2.0)
-        inner_edge = FakeEdge(curveType='Circle3DCurveType', length=2.0)
-        face1 = FakeFace(surfaceType='PlaneSurfaceType', edges=[outer_edge])
-        face2 = FakeFace(surfaceType='PlaneSurfaceType', edges=[inner_edge])
+        """Test fallback to planar face detection when startFaces unavailable."""
+        clearance_hole = FakeEdge(curveType='Circle3DCurveType', length=9.6)
+        arc_edge1 = FakeEdge(curveType='Circle3DCurveType', length=1.8)
+        arc_edge2 = FakeEdge(curveType='Circle3DCurveType', length=2.0)
+        arc_edge3 = FakeEdge(curveType='Circle3DCurveType', length=1.9)
+        face1 = FakeFace(surfaceType='PlaneSurfaceType', 
+                        edges=[clearance_hole, arc_edge1, arc_edge2, arc_edge3])
 
         extrude = MagicMock()
         extrude.startFaces = None
-        extrude.faces = [face1, face2]
+        extrude.faces = [face1]
 
         edges = getGripRidgeChamferEdges(extrude)
 
+        # Should return only arc edges (largest is 2.0, threshold is 1.0)
         assert edges is not None
-        assert edges.count == 2
-        assert set(edges._items) == {outer_edge, inner_edge}
+        assert edges.count == 3
+        assert set(edges._items) == {arc_edge1, arc_edge2, arc_edge3}
 
     def test_addAngleChamferToEdge_sets_distance_and_angle(self, monkeypatch):
         edge = FakeEdge(curveType='Circle3DCurveType', length=2.0)
