@@ -33,6 +33,13 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
 
             inputs = cmd.commandInputs
 
+            # Force dialog width: hidden text input with long label
+            widthSpacer = inputs.addTextBoxCommandInput(
+                'widthSpacer', '',
+                '                                                                                ',
+                1, True)
+            widthSpacer.isVisible = False
+
             # --- Selection group ---
             selGroup = inputs.addGroupCommandInput('selectionGroup', 'Selection')
 
