@@ -10,7 +10,8 @@ from tm_config import (
     load_config,
     save_last_selected_insert,
     save_checkbox_states,
-    create_default_config
+    create_default_config,
+    get_default_grip_ridge_inserts,
 )
 import tm_state
 
@@ -62,6 +63,87 @@ class TestGetDefaultInserts:
             assert hole_dia > 0, f"{name}: hole_dia not positive"
             assert insert_len > 0, f"{name}: insert_len not positive"
             assert min_wall >= 0, f"{name}: min_wall not non-negative"
+
+
+class TestGetDefaultGripRidgeInserts:
+    """Test get_default_grip_ridge_inserts function."""
+
+    def test_returns_dict(self):
+        """Should return a dictionary."""
+        inserts = get_default_grip_ridge_inserts()
+        assert isinstance(inserts, dict)
+
+    def test_has_9_entries(self):
+        """Should have exactly 9 default grip-ridge inserts (M1.6–M10)."""
+        inserts = get_default_grip_ridge_inserts()
+        assert len(inserts) == 9
+
+    def test_m3_grip_present(self):
+        """Should include M3 Grip with correct values."""
+        inserts = get_default_grip_ridge_inserts()
+        assert 'M3 Grip' in inserts
+        clearance, depth, wall, nominal = inserts['M3 Grip']
+        assert clearance == 3.2
+        assert depth == 7.0
+        assert wall == 1.6
+        assert nominal == 3.0
+
+    def test_m6_grip_present(self):
+        """Should include M6 Grip with correct values."""
+        inserts = get_default_grip_ridge_inserts()
+        assert 'M6 Grip' in inserts
+        clearance, depth, wall, nominal = inserts['M6 Grip']
+        assert clearance == 6.4
+        assert depth == 12.0
+        assert wall == 3.0
+        assert nominal == 6.0
+
+    def test_all_sizes_present(self):
+        """Should include all sizes from M1.6 to M10."""
+        inserts = get_default_grip_ridge_inserts()
+        expected_names = [
+            'M1.6 Grip', 'M2 Grip', 'M2.5 Grip', 'M3 Grip',
+            'M4 Grip', 'M5 Grip', 'M6 Grip', 'M8 Grip', 'M10 Grip'
+        ]
+        for name in expected_names:
+            assert name in inserts, f"{name} missing from defaults"
+
+    def test_arc_geometry_params(self):
+        """Arc ridge circles should have valid geometry parameters."""
+        inserts = get_default_grip_ridge_inserts()
+        for name, (clearance, depth, wall, nominal) in inserts.items():
+            # Arc circle diameter = 0.5 * nominal
+            arc_dia = 0.5 * nominal
+            # Arc center distance = 0.6 * nominal
+            arc_center_dist = 0.6 * nominal
+
+            # Arc circles should be smaller than the clearance hole
+            assert arc_dia < clearance, \
+                f"{name}: arc dia {arc_dia} >= clearance {clearance}"
+
+            # Arc center distance should position arcs partially outside
+            # the clearance hole for grip functionality
+            clearance_radius = clearance / 2.0
+            arc_radius = arc_dia / 2.0
+            outer_reach = arc_center_dist + arc_radius
+            assert outer_reach > clearance_radius, \
+                f"{name}: arcs don't extend beyond clearance hole"
+
+    def test_all_values_positive(self):
+        """All values should be positive."""
+        inserts = get_default_grip_ridge_inserts()
+        for name, (clearance, depth, wall, nominal) in inserts.items():
+            assert clearance > 0, f"{name}: clearance not positive"
+            assert depth > 0, f"{name}: depth not positive"
+            assert wall >= 0, f"{name}: wall not non-negative"
+            assert nominal > 0, f"{name}: nominal dia not positive"
+
+    def test_clearance_greater_than_nominal(self):
+        """Clearance hole diameter must be greater than the nominal thread diameter."""
+        inserts = get_default_grip_ridge_inserts()
+        for name, (clearance, depth, wall, nominal) in inserts.items():
+            assert clearance > nominal, \
+                f"{name}: clearance {clearance} <= nominal {nominal}"
 
 
 class TestLoadConfig:

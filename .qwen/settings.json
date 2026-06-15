@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Agent(Explore)",
+      "Bash(python *)",
+      "Bash(dir *)",
+      "Bash(py *)",
+      "Bash(c:\\users\\pulsar *)",
+      "Bash(\"c:\\users\\pulsar workshop\\anaconda3\\python.exe\" *)"
+    ]
+  },
+  "$version": 4
+}

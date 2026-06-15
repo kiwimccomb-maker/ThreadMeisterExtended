@@ -12,6 +12,7 @@ from tm_geometry import (
     addChamferToEdge,
     findDistanceThroughBody,
     addBottomRadiusToBlindHole,
+    create_grip_ridge_sketch,
 )
 
 
@@ -42,9 +43,15 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
 
             tm_config.save_checkbox_states(includeChamfer, includeBottomRadius, showMessage, isBlindHole)
 
-            holeDia, insertLen, minWall = tm_state.INSERT_SPECS[insertName]
-            radius = holeDia / 2.0 / 10.0   # mm -> cm
-            diameter = radius * 2.0
+            is_grip_ridge = insertName in tm_state.GRIP_RIDGE_INSERTS
+
+            if is_grip_ridge:
+                clearanceDia, insertLen, minWall, nominalDia = tm_state.GRIP_RIDGE_INSERTS[insertName]
+                holeDia = clearanceDia
+            else:
+                holeDia, insertLen, minWall = tm_state.INSERT_SPECS[insertName]
+
+            diameter = holeDia / 10.0   # mm -> cm
 
             successCount = 0
             failedCount = 0
@@ -73,19 +80,32 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                 projectedEntities = tempSketch.project(point)
                 projectedPoint = projectedEntities.item(0)
 
-                # Create bore circle in clean sketch
-                circle = tempSketch.sketchCurves.sketchCircles.addByCenterRadius(
-                    projectedPoint.geometry, radius)
-                tempConstraints = tempSketch.geometricConstraints
-                tempConstraints.addCoincident(circle.centerSketchPoint, projectedPoint)
+                if is_grip_ridge:
+                    profile_or_collection = create_grip_ridge_sketch(
+                        tempSketch, projectedPoint.geometry, clearanceDia, nominalDia)
+                    if profile_or_collection is None:
+                        failedCount += 1
+                        failMessages.append(
+                            f'Point {point_idx+1}: Could not create grip-ridge profile.')
+                        tempSketch.deleteMe()
+                        continue
+                else:
+                    radius = holeDia / 2.0 / 10.0   # mm -> cm
 
-                profile_or_collection = findProfileForCircle(tempSketch, circle)
+                    # Create bore circle in clean sketch
+                    circle = tempSketch.sketchCurves.sketchCircles.addByCenterRadius(
+                        projectedPoint.geometry, radius)
+                    tempConstraints = tempSketch.geometricConstraints
+                    tempConstraints.addCoincident(circle.centerSketchPoint, projectedPoint)
 
-                if profile_or_collection is None:
-                    failedCount += 1
-                    failMessages.append(f'Point {point_idx+1}: Could not create bore profile.')
-                    tempSketch.deleteMe()
-                    continue
+                    profile_or_collection = findProfileForCircle(tempSketch, circle)
+
+                    if profile_or_collection is None:
+                        failedCount += 1
+                        failMessages.append(
+                            f'Point {point_idx+1}: Could not create bore profile.')
+                        tempSketch.deleteMe()
+                        continue
 
                 # Export debug JSON if enabled
                 if shouldExport:

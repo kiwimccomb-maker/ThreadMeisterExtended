@@ -1,6 +1,6 @@
 """
 tm_geometry.py – All geometry functions: profile finding, extrusion direction,
-chamfer, fillet, and through-body distance.
+chamfer, fillet, through-body distance, and grip-ridge sketch generation.
 """
 import adsk.core, adsk.fusion, traceback
 import math
@@ -546,4 +546,71 @@ def addBottomRadiusToBlindHole(component, extrudeFeature, targetBody, sketch, ci
     except Exception:
         if tm_state._ui:
             tm_state._ui.messageBox('Error in addBottomRadiusToBlindHole:\n{}'.format(traceback.format_exc()))
+        return None
+
+
+def create_grip_ridge_sketch(sketch, center_point_2d, clearance_dia_mm, nominal_dia_mm):
+    """
+    Create a grip-ridge insert profile in the given sketch.
+
+    Draws a central clearance hole and three arc grip ridges at 120° intervals.
+    Each arc circle has diameter = 0.5 * nominal_dia_mm, centred at distance
+    0.6 * nominal_dia_mm from the centre.
+
+    Args:
+        sketch: Fusion 360 Sketch object
+        center_point_2d: Point2D at the sketch centre
+        clearance_dia_mm: Clearance hole diameter in mm
+        nominal_dia_mm: Nominal (major) thread diameter in mm
+
+    Returns:
+        The combined profile (largest profile containing the centre point),
+        or None if not found.
+    """
+    try:
+        # Convert mm to cm (Fusion internal units)
+        clearance_radius = clearance_dia_mm / 2.0 / 10.0
+
+        arc_circle_dia = 0.5 * nominal_dia_mm
+        arc_circle_radius = arc_circle_dia / 2.0 / 10.0
+        arc_center_distance = 0.6 * nominal_dia_mm / 10.0
+
+        # Draw central clearance hole circle
+        sketch.sketchCurves.sketchCircles.addByCenterRadius(
+            center_point_2d, clearance_radius)
+
+        # Draw three arc grip ridge circles at 0°, 120°, 240°
+        for angle_deg in (0.0, 120.0, 240.0):
+            angle_rad = math.radians(angle_deg)
+            arc_x = center_point_2d.x + arc_center_distance * math.cos(angle_rad)
+            arc_y = center_point_2d.y + arc_center_distance * math.sin(angle_rad)
+            arc_center = adsk.core.Point3D.create(arc_x, arc_y, 0.0)
+            sketch.sketchCurves.sketchCircles.addByCenterRadius(
+                arc_center, arc_circle_radius)
+
+        # Find the combined profile: the largest profile whose centroid is
+        # very close to the centre point (the union of all overlapping circles)
+        centre_3d = adsk.core.Point3D.create(
+            center_point_2d.x, center_point_2d.y, 0.0)
+
+        best_profile = None
+        best_area = 0.0
+
+        for prof in sketch.profiles:
+            props = prof.areaProperties(
+                adsk.fusion.CalculationAccuracy.MediumCalculationAccuracy)
+            centroid = props.centroid
+            dist = centre_3d.distanceTo(centroid)
+
+            # Accept only profiles whose centroid is within 0.1 mm of centre
+            if dist < 0.01 and props.area > best_area:
+                best_area = props.area
+                best_profile = prof
+
+        return best_profile
+
+    except Exception:
+        if tm_state._ui:
+            tm_state._ui.messageBox(
+                'Error in create_grip_ridge_sketch:\n{}'.format(traceback.format_exc()))
         return None

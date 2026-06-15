@@ -9,6 +9,36 @@ import adsk.core
 # Tolerance for geometric comparisons
 TOL = 1e-6
 
+# ISO metric thread data: major diameter and clearance hole (close fit, mm)
+# M1.6 through M10 per ISO 68-1 / ISO 724
+M_SERIES_DATA = {
+    'M1.6':  (1.6, 1.7),
+    'M2':    (2.0, 2.2),
+    'M2.5':  (2.5, 2.7),
+    'M3':    (3.0, 3.2),
+    'M4':    (4.0, 4.3),
+    'M5':    (5.0, 5.3),
+    'M6':    (6.0, 6.4),
+    'M8':    (8.0, 8.4),
+    'M10':   (10.0, 10.5),
+}
+
+# Grip-ridge insert specifications: name -> (clearance_dia_mm, insert_depth_mm, min_wall_mm, nominal_dia_mm)
+# Populated at startup by tm_config.load_config(); defaults are set here as fallback.
+# Arc grip ridges: 3 arcs at 120°, each arc circle dia = 0.5 * nominal_dia,
+# centred at distance 0.6 * nominal_dia from the hole centre.
+GRIP_RIDGE_INSERTS = {
+    'M1.6 Grip':  (1.7, 4.0, 1.0, 1.6),
+    'M2 Grip':    (2.2, 5.0, 1.2, 2.0),
+    'M2.5 Grip':  (2.7, 6.0, 1.5, 2.5),
+    'M3 Grip':    (3.2, 7.0, 1.6, 3.0),
+    'M4 Grip':    (4.3, 8.0, 2.0, 4.0),
+    'M5 Grip':    (5.3, 9.0, 2.5, 5.0),
+    'M6 Grip':    (6.4, 12.0, 3.0, 6.0),
+    'M8 Grip':    (8.4, 14.0, 4.0, 8.0),
+    'M10 Grip':   (10.5, 16.0, 5.0, 10.0),
+}
+
 # Insert specifications: name -> (hole_diameter_mm, insert_length_mm, min_wall_mm)
 # Populated at startup by tm_config.load_config(); defaults are set here as fallback.
 INSERT_SPECS = {

@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Agent(Explore)",
+      "Bash(python *)",
+      "Bash(dir *)",
+      "Bash(py *)",
+      "Bash(c:\\users\\pulsar *)"
+    ]
+  },
+  "$version": 4
+}

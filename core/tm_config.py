@@ -4,10 +4,11 @@ tm_config.py – Configuration loading, validation, saving, and defaults.
 Reads/writes config.ini. Mutates INSERT_SPECS and CONFIG in tm_state.
 
 Config sections:
-  [Settings]   - Design parameters (chamfer_size, blind_hole_extra_depth, bottom_radius_size)
-  [Inserts]    - Insert specifications (name = diameter, length, min_wall)
-  [UI State]   - Remembered menu state (chamfer_enabled_default, bottom_radius_enabled_default, etc.)
-  [Developer]  - Debug flags (enable_logging, enable_debug_export)
+  [Settings]         - Design parameters (chamfer_size, blind_hole_extra_depth, bottom_radius_size)
+  [Inserts]          - Insert specifications (name = diameter, length, min_wall)
+  [GripRidgeInserts] - Grip-ridge insert specs (name = clearance_dia, depth, min_wall, nominal_dia)
+  [UI State]         - Remembered menu state (chamfer_enabled_default, bottom_radius_enabled_default, etc.)
+  [Developer]        - Debug flags (enable_logging, enable_debug_export)
 """
 import os
 import configparser
@@ -142,6 +143,58 @@ def load_config():
             tm_state.INSERT_SPECS.update(get_default_inserts())
             warnings.append('Using default CNC Kitchen specifications.')
 
+        # --- [GripRidgeInserts] ---
+        tm_state.GRIP_RIDGE_INSERTS.clear()
+        if config.has_section('GripRidgeInserts'):
+            for name in config.options('GripRidgeInserts'):
+                if name.startswith('#'):
+                    continue
+                try:
+                    values = config.get('GripRidgeInserts', name)
+                    if not values.strip() or values.strip().startswith('#'):
+                        continue
+                    parts = [x.strip() for x in values.split(',')]
+                    if len(parts) != 4:
+                        warnings.append(
+                            f'Grip-ridge insert "{name}" has {len(parts)} values (expected 4). Skipped.')
+                        continue
+                    try:
+                        clearance_dia = float(parts[0])
+                        depth = float(parts[1])
+                        min_wall = float(parts[2])
+                        nominal_dia = float(parts[3])
+                        if clearance_dia <= 0 or clearance_dia > 50:
+                            warnings.append(
+                                f'Grip-ridge insert "{name}": clearance diameter '
+                                f'{clearance_dia}mm is invalid. Skipped.')
+                            continue
+                        if depth <= 0 or depth > 100:
+                            warnings.append(
+                                f'Grip-ridge insert "{name}": depth {depth}mm is invalid. Skipped.')
+                            continue
+                        if min_wall < 0 or min_wall > 20:
+                            warnings.append(
+                                f'Grip-ridge insert "{name}": min wall {min_wall}mm is invalid. Skipped.')
+                            continue
+                        if nominal_dia <= 0 or nominal_dia > 50:
+                            warnings.append(
+                                f'Grip-ridge insert "{name}": nominal diameter '
+                                f'{nominal_dia}mm is invalid. Skipped.')
+                            continue
+                        tm_state.GRIP_RIDGE_INSERTS[name] = (
+                            clearance_dia, depth, min_wall, nominal_dia)
+                    except ValueError:
+                        warnings.append(
+                            f'Grip-ridge insert "{name}": Invalid number format. Skipped.')
+                        continue
+                except Exception:
+                    warnings.append(
+                        f'Grip-ridge insert "{name}": Error reading values. Skipped.')
+                    continue
+
+        if not tm_state.GRIP_RIDGE_INSERTS:
+            tm_state.GRIP_RIDGE_INSERTS.update(get_default_grip_ridge_inserts())
+
         # Auto-migrate old format to new sections
         if needs_migration:
             _migrate_config(config_file)
@@ -189,6 +242,12 @@ def _write_config_file(config_file=None):
     config.add_section('Inserts')
     for name, (dia, length, wall) in tm_state.INSERT_SPECS.items():
         config.set('Inserts', name, f'{dia}, {length}, {wall}')
+
+    # [GripRidgeInserts]
+    config.add_section('GripRidgeInserts')
+    for name, (clearance_dia, depth, wall, nominal_dia) in tm_state.GRIP_RIDGE_INSERTS.items():
+        config.set('GripRidgeInserts', name,
+                   f'{clearance_dia}, {depth}, {wall}, {nominal_dia}')
 
     # [UI State]
     config.add_section('UI State')
@@ -259,6 +318,21 @@ def get_default_inserts():
     }
 
 
+def get_default_grip_ridge_inserts():
+    """Return the default grip-ridge insert specifications."""
+    return {
+        'M1.6 Grip':  (1.7, 4.0, 1.0, 1.6),
+        'M2 Grip':    (2.2, 5.0, 1.2, 2.0),
+        'M2.5 Grip':  (2.7, 6.0, 1.5, 2.5),
+        'M3 Grip':    (3.2, 7.0, 1.6, 3.0),
+        'M4 Grip':    (4.3, 8.0, 2.0, 4.0),
+        'M5 Grip':    (5.3, 9.0, 2.5, 5.0),
+        'M6 Grip':    (6.4, 12.0, 3.0, 6.0),
+        'M8 Grip':    (8.4, 14.0, 4.0, 8.0),
+        'M10 Grip':   (10.5, 16.0, 5.0, 10.0),
+    }
+
+
 def create_default_config():
     """Write a default config.ini file in the new multi-section format."""
     config_file = _get_config_path()
@@ -272,6 +346,10 @@ def create_default_config():
             f.write('[Inserts]\n')
             for name, (dia, length, wall) in get_default_inserts().items():
                 f.write(f'{name} = {dia}, {length}, {wall}\n')
+            f.write('\n')
+            f.write('[GripRidgeInserts]\n')
+            for name, (clearance_dia, depth, wall, nominal_dia) in get_default_grip_ridge_inserts().items():
+                f.write(f'{name} = {clearance_dia}, {depth}, {wall}, {nominal_dia}\n')
             f.write('\n')
             f.write('[UI State]\n')
             f.write('chamfer_enabled_default = True\n')

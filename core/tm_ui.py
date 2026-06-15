@@ -52,7 +52,16 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
 
             lastSelected = tm_state.CONFIG.get('last_selected_insert', 'M3 x 5.7mm (standard)')
             foundLastSelected = False
+
+            # Standard heat-set inserts
             for name in tm_state.INSERT_SPECS.keys():
+                isSelected = (name == lastSelected)
+                if isSelected:
+                    foundLastSelected = True
+                insertList.add(name, isSelected)
+
+            # Grip-ridge inserts (with visual separator)
+            for name in tm_state.GRIP_RIDGE_INSERTS.keys():
                 isSelected = (name == lastSelected)
                 if isSelected:
                     foundLastSelected = True
@@ -147,7 +156,14 @@ def updateInfoText(inputs):
         insertName = insertSize.selectedItem.name
         isBlindHole = holeType.selectedItem.name == 'Blind Hole'
 
-        holeDia, insertLen, minWall = tm_state.INSERT_SPECS[insertName]
+        is_grip_ridge = insertName in tm_state.GRIP_RIDGE_INSERTS
+
+        if is_grip_ridge:
+            clearanceDia, insertLen, minWall, nominalDia = tm_state.GRIP_RIDGE_INSERTS[insertName]
+            holeDia = clearanceDia
+            arc_dia = 0.5 * nominalDia
+        else:
+            holeDia, insertLen, minWall = tm_state.INSERT_SPECS[insertName]
 
         addChamfer = inputs.itemById('addChamfer')
         chamferOn = addChamfer.value if addChamfer else False
@@ -163,11 +179,19 @@ def updateInfoText(inputs):
         else:
             depthStr = 'Through body'
 
-        info = (f'<b>Specifications:</b><br/>' +
-                f'Hole diameter: {holeDia} mm<br/>' +
-                f'Insert length: {insertLen} mm<br/>' +
-                f'Hole depth: {depthStr}<br/>' +
-                f'Min wall thickness: {minWall} mm')
+        if is_grip_ridge:
+            info = (f'<b>Grip-Ridge Insert Specifications:</b><br/>' +
+                    f'Clearance hole: {holeDia:.1f} mm (M{nominalDia:.1f})<br/>' +
+                    f'Arc ridges: 3x at 120°, dia = {arc_dia:.1f} mm<br/>' +
+                    f'Insert depth: {insertLen:.1f} mm<br/>' +
+                    f'Hole depth: {depthStr}<br/>' +
+                    f'Min wall thickness: {minWall} mm')
+        else:
+            info = (f'<b>Specifications:</b><br/>' +
+                    f'Hole diameter: {holeDia} mm<br/>' +
+                    f'Insert length: {insertLen} mm<br/>' +
+                    f'Hole depth: {depthStr}<br/>' +
+                    f'Min wall thickness: {minWall} mm')
 
         infoText.formattedText = info
 
