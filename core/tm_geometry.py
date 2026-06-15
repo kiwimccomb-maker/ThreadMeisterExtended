@@ -528,7 +528,7 @@ def addChamferToEdge(component, edge, chamferSize):
         chamfers = component.features.chamferFeatures
         edges = adsk.core.ObjectCollection.create()
         edges.add(edge)
-        chamferInput = chamfers.createInput(edges, True)
+        chamferInput = chamfers.createInput(edges, False)
         chamferDistance = adsk.core.ValueInput.createByReal(chamferSize / 10.0)
         chamferInput.setToEqualDistance(chamferDistance)
         chamfer = chamfers.add(chamferInput)
@@ -569,7 +569,7 @@ def addAngleChamferToEdge(component, edge, chamferSize, angleDeg):
         edges = adsk.core.ObjectCollection.create()
         edges.add(edge)
 
-        chamferInput = chamfers.createInput(edges, True)
+        chamferInput = chamfers.createInput(edges, False)
         chamferDistance = adsk.core.ValueInput.createByReal(chamferSize / 10.0)
         angleRad = math.radians(angleDeg)
         angleValue = adsk.core.ValueInput.createByReal(angleRad)
