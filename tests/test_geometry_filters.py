@@ -331,8 +331,8 @@ class TestFilterByCurvePoints:
         assert len(result) == 1
         assert result[0][0] == profile
 
-    def test_getGripRidgeChamferEdges_excludes_clearance_hole(self):
-        """Test that clearance hole boundary is excluded, only arc ridges are returned."""
+    def test_getGripRidgeChamferEdges_includes_all_top_edges(self):
+        """Test that all top face edges are returned, including the clearance hole."""
         # Clearance hole edge is largest
         clearance_hole = FakeEdge(curveType='Circle3DCurveType', length=10.0)
         # Arc ridge edges are smaller
@@ -348,11 +348,10 @@ class TestFilterByCurvePoints:
 
         edges = getGripRidgeChamferEdges(extrude)
 
-        # Should return only arc edges, excluding the clearance hole
+        # Should return all top edges without filtering by edge length
         assert edges is not None
-        assert edges.count == 3
-        assert set(edges._items) == {arc_edge1, arc_edge2, arc_edge3}
-        assert clearance_hole not in edges._items
+        assert edges.count == 4
+        assert set(edges._items) == {clearance_hole, arc_edge1, arc_edge2, arc_edge3}
 
     def test_getGripRidgeChamferEdges_falls_back_to_planar_faces(self):
         """Test fallback to planar face detection when startFaces unavailable."""
@@ -369,10 +368,10 @@ class TestFilterByCurvePoints:
 
         edges = getGripRidgeChamferEdges(extrude)
 
-        # Should return only arc edges (largest is 2.0, threshold is 1.0)
+        # Should return all top edges without filtering by edge length
         assert edges is not None
-        assert edges.count == 3
-        assert set(edges._items) == {arc_edge1, arc_edge2, arc_edge3}
+        assert edges.count == 4
+        assert set(edges._items) == {clearance_hole, arc_edge1, arc_edge2, arc_edge3}
 
     def test_addAngleChamferToEdge_sets_distance_and_angle(self, monkeypatch):
         edge = FakeEdge(curveType='Circle3DCurveType', length=2.0)

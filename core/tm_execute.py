@@ -49,7 +49,7 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
             is_grip_ridge = insertName in tm_state.GRIP_RIDGE_INSERTS
 
             if is_grip_ridge:
-                clearanceDia, configInsertLen, minWall, nominalDia, gripEdgeChamfer = tm_state.GRIP_RIDGE_INSERTS[insertName]
+                clearanceDia, configInsertLen, minWall, nominalDia, _gripEdgeChamfer = tm_state.GRIP_RIDGE_INSERTS[insertName]
                 # Pre-calculate the default total depth (insert + extra depth)
                 # Chamfer is applied to the edge AFTER extrusion, not part of hole depth
                 configDepth = configInsertLen + tm_state.CONFIG['blind_hole_extra_depth']
@@ -191,7 +191,7 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                             for i in range(gripEdges.count):
                                 addAngleChamferToEdge(
                                     component, gripEdges.item(i),
-                                    gripEdgeChamfer, grip_chamfer_angle)
+                                    tm_state.CONFIG['chamfer_size'], grip_chamfer_angle)
                     else:
                         # Standard: single 45° equal-distance chamfer
                         chamferEdge = findChamferEdge(extrude, targetBody, parentSketch, center2d, diameter)

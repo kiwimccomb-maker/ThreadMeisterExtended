@@ -404,12 +404,11 @@ def findChamferEdge(extrudeFeature, targetBody, sketch, circleCenter, holeDiamet
 
 def getGripRidgeChamferEdges(extrudeFeature, referenceSketch=None, referencePoint2d=None):
     """
-    Get the arc ridge edges for chamfering on a grip-ridge extrude.
+    Get the top face edges for chamfering on a grip-ridge extrude.
 
-    The grip-ridge sketch uses trimmed arcs (not overlapping full circles),
-    so the extruded top face has separate edge segments for each arc ridge
-    and the clearance circle. Arc ridge edges are shorter than the clearance
-    boundary segments.
+    The grip-ridge sketch uses a non-circular profile. Chamfering should apply
+    to every edge around the entrance/top face, including the clearance-hole
+    boundary and the ridge arcs.
 
     Args:
         extrudeFeature: The extrude feature that created the grip-ridge hole
@@ -420,7 +419,7 @@ def getGripRidgeChamferEdges(extrudeFeature, referenceSketch=None, referencePoin
         adsk.core.ObjectCollection of arc ridge edges, or None if not found.
     """
     try:
-        edges_by_length = []
+        edges = []
 
         def get_reference_point():
             if referenceSketch is not None and referencePoint2d is not None:
@@ -436,17 +435,33 @@ def getGripRidgeChamferEdges(extrudeFeature, referenceSketch=None, referencePoin
                     if hasattr(face, 'geometry') and
                     face.geometry.surfaceType == adsk.core.SurfaceTypes.PlaneSurfaceType]
 
+        def distance_to_face_plane(face, point):
+            face_plane = face.geometry
+            face_origin = getattr(face_plane, 'origin', None)
+            if face_origin is None:
+                return None
+
+            face_normal = getattr(face_plane, 'normal', None)
+            if face_normal is None:
+                return face_origin.distanceTo(point)
+
+            vec = adsk.core.Vector3D.create(
+                point.x - face_origin.x,
+                point.y - face_origin.y,
+                point.z - face_origin.z
+            )
+            return abs(vec.x * face_normal.x + vec.y * face_normal.y + vec.z * face_normal.z)
+
         ref_point = get_reference_point()
         candidate_faces = []
 
         if ref_point is not None:
             face_distances = []
             for face in planar_faces():
-                face_plane = face.geometry
-                face_origin = getattr(face_plane, 'origin', None)
-                if face_origin is None:
+                distance = distance_to_face_plane(face, ref_point)
+                if distance is None:
                     continue
-                face_distances.append((face, abs(face_origin.distanceTo(ref_point))))
+                face_distances.append((face, distance))
             if face_distances:
                 min_dist = min(dist for _face, dist in face_distances)
                 tolerance = 0.001
@@ -470,21 +485,14 @@ def getGripRidgeChamferEdges(extrudeFeature, referenceSketch=None, referencePoin
                 edge_length = getattr(edge, 'length', None)
                 if edge_length is None or edge_length < 0.01:
                     continue
-                edges_by_length.append((edge, edge_length))
+                edges.append(edge)
 
-        if not edges_by_length:
+        if not edges:
             return None
 
-        edges_by_length.sort(key=lambda x: x[1], reverse=True)
-
-        # The clearance boundary is the longest edge(s).
-        # Arc ridge edges are shorter. Filter by a generous length threshold.
         result = adsk.core.ObjectCollection.create()
-        if len(edges_by_length) >= 2:
-            longest = edges_by_length[0][1]
-            for edge, edge_length in edges_by_length:
-                if edge_length < longest * 0.8:
-                    result.add(edge)
+        for edge in edges:
+            result.add(edge)
 
         if result.count > 0:
             return result
