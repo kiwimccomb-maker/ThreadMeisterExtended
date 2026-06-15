@@ -9,6 +9,7 @@ from tm_geometry import (
     findProfileForCircle,
     findExtrudeDirectionFromSketch,
     findChamferEdge,
+    findGripRidgeChamferEdges,
     addChamferToEdge,
     addAngleChamferToEdge,
     findDistanceThroughBody,
@@ -27,7 +28,6 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
             holeType = inputs.itemById('holeType')
             addChamfer = inputs.itemById('addChamfer')
             addBottomRadius = inputs.itemById('addBottomRadius')
-            showSuccessMessage = inputs.itemById('showSuccessMessage')
             exportDebugInput = inputs.itemById('exportDebug')
             gripEdgeDepthInput = inputs.itemById('gripEdgeDepth')
             shouldExport = exportDebugInput is not None and exportDebugInput.value
@@ -39,9 +39,9 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
             tm_config.save_last_selected_insert(insertName)
 
             isBlindHole = holeType.selectedItem.name == 'Blind Hole'
-            includeChamfer = addChamfer.value
-            includeBottomRadius = addBottomRadius.value and isBlindHole
-            showMessage = showSuccessMessage.value if showSuccessMessage else tm_state.CONFIG.get('show_success_message', True)
+            includeChamfer = addChamfer.value if addChamfer else tm_state.CONFIG.get('chamfer_enabled_default', True)
+            includeBottomRadius = (addBottomRadius.value if addBottomRadius else tm_state.CONFIG.get('bottom_radius_enabled_default', False)) and isBlindHole
+            showMessage = tm_state.CONFIG.get('show_success_message', True)
 
             tm_config.save_checkbox_states(includeChamfer, includeBottomRadius, showMessage, isBlindHole)
 
@@ -50,7 +50,7 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
             if is_grip_ridge:
                 clearanceDia, configDepth, minWall, nominalDia, gripEdgeChamfer = tm_state.GRIP_RIDGE_INSERTS[insertName]
                 # Use spinner value if present and visible, otherwise config default
-                if gripEdgeDepthInput and gripEdgeDepthInput.isVisible:
+                if gripEdgeDepthInput is not None and gripEdgeDepthInput.isVisible:
                     insertLen = gripEdgeDepthInput.value
                 else:
                     insertLen = configDepth
@@ -157,15 +157,19 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                 extrude = extrudes.add(extInput)
 
                 if includeChamfer:
-                    chamferEdge = findChamferEdge(extrude, targetBody, parentSketch, center2d, diameter)
-                    if chamferEdge:
-                        if is_grip_ridge:
-                            # Grip-ridge holes use a 60-degree angle chamfer
-                            grip_chamfer_angle = tm_state.CONFIG.get('grip_chamfer_angle', 60)
+                    if is_grip_ridge:
+                        # Grip-ridge: chamfer the 3 grip-ridge arc edges only
+                        grip_chamfer_angle = tm_state.CONFIG.get('grip_chamfer_angle', 60)
+                        gripEdges = findGripRidgeChamferEdges(
+                            extrude, targetBody, parentSketch, center2d, nominalDia)
+                        for gripEdge in gripEdges:
                             addAngleChamferToEdge(
-                                component, chamferEdge,
+                                component, gripEdge,
                                 tm_state.CONFIG['chamfer_size'], grip_chamfer_angle)
-                        else:
+                    else:
+                        # Standard: single 45° equal-distance chamfer
+                        chamferEdge = findChamferEdge(extrude, targetBody, parentSketch, center2d, diameter)
+                        if chamferEdge:
                             addChamferToEdge(component, chamferEdge, tm_state.CONFIG['chamfer_size'])
 
                 if includeBottomRadius:

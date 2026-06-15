@@ -33,32 +33,25 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
 
             inputs = cmd.commandInputs
 
-            # Force dialog width: hidden text input with long label
-            widthSpacer = inputs.addTextBoxCommandInput(
-                'widthSpacer', '',
-                '                                                                                ',
-                1, True)
-            widthSpacer.isVisible = False
-
-            # --- Selection group ---
-            selGroup = inputs.addGroupCommandInput('selectionGroup', 'Selection')
-
-            bodySelect = selGroup.children.addSelectionInput('bodySelect', 'Target Body',
-                                                             'Select the body to add insert holes to')
+            # Target body selection
+            inputs.addSelectionInput('bodySelect', 'Target Body',
+                                     'Select the solid body to cut into')
+            # The selection filter and limits are set below after creation
+            bodySelect = inputs.itemById('bodySelect')
             bodySelect.addSelectionFilter('SolidBodies')
             bodySelect.setSelectionLimits(1, 1)
 
-            pointSelect = selGroup.children.addSelectionInput('pointSelect', 'Sketch Point(s)',
-                                                              'Select sketch point(s) on a planar face')
+            # Sketch point selection
+            inputs.addSelectionInput('pointSelect', 'Sketch Point(s)',
+                                     'Select sketch point(s) where holes will be created')
+            pointSelect = inputs.itemById('pointSelect')
             pointSelect.addSelectionFilter('SketchPoints')
             pointSelect.setSelectionLimits(1, 0)
 
-            # --- Insert configuration group ---
-            cfgGroup = inputs.addGroupCommandInput('configGroup', 'Insert Configuration')
-
             # Insert size dropdown
-            insertDropdown = cfgGroup.children.addDropDownCommandInput('insertSize', 'Insert Size',
-                                                                       adsk.core.DropDownStyles.TextListDropDownStyle)
+            inputs.addDropDownCommandInput('insertSize', 'Insert Size',
+                                           adsk.core.DropDownStyles.TextListDropDownStyle)
+            insertDropdown = inputs.itemById('insertSize')
             insertList = insertDropdown.listItems
 
             lastSelected = tm_state.CONFIG.get('last_selected_insert', 'M3 x 5.7mm (standard)')
@@ -80,7 +73,7 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
                 insertList.item(0).isSelected = True
 
             # Hole type
-            holeTypeGroup = cfgGroup.children.addRadioButtonGroupCommandInput('holeType', 'Hole Type')
+            holeTypeGroup = inputs.addRadioButtonGroupCommandInput('holeType', 'Hole Type')
             saved_is_blind = tm_state.CONFIG.get('hole_type_blind', True)
             holeTypeGroup.listItems.add('Blind Hole', saved_is_blind)
             holeTypeGroup.listItems.add('Through Hole', not saved_is_blind)
@@ -89,35 +82,33 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             _, insertLen_default, _, _, _ = tm_state.GRIP_RIDGE_INSERTS.get(
                 lastSelected, (0, 7.0, 0, 0, 0))
             isGripDefault = lastSelected in tm_state.GRIP_RIDGE_INSERTS
-            depthInput = cfgGroup.children.addFloatSpinnerCommandInput(
-                'gripEdgeDepth', 'Depth (mm)', 'mm', 0.1, 100.0, insertLen_default, 1)
+            inputs.addFloatSpinnerCommandInput(
+                'gripEdgeDepth', 'Hole Depth (mm)', 'mm', 0.1, 100.0, insertLen_default, 1)
+            depthInput = inputs.itemById('gripEdgeDepth')
             depthInput.isVisible = isGripDefault
 
-            # --- Options group ---
-            optGroup = inputs.addGroupCommandInput('optionsGroup', 'Options')
+            # Chamfer option
+            inputs.addBoolValueInput('addChamfer',
+                                     f'Add Chamfer ({tm_state.CONFIG["chamfer_size"]}mm)',
+                                     True, '',
+                                     tm_state.CONFIG['chamfer_enabled_default'])
 
-            optGroup.children.addBoolValueInput('addChamfer',
-                                                f'Add Chamfer ({tm_state.CONFIG["chamfer_size"]}mm)',
-                                                True, '',
-                                                tm_state.CONFIG['chamfer_enabled_default'])
+            # Bottom radius option
+            inputs.addBoolValueInput('addBottomRadius',
+                                     f'Add Bottom Fillet ({tm_state.CONFIG["bottom_radius_size"]}mm)',
+                                     True, '',
+                                     tm_state.CONFIG['bottom_radius_enabled_default'])
 
-            optGroup.children.addBoolValueInput('addBottomRadius',
-                                                f'Add Bottom Fillet ({tm_state.CONFIG["bottom_radius_size"]}mm)',
-                                                True, '',
-                                                tm_state.CONFIG['bottom_radius_enabled_default'])
-
-            # --- Info text ---
+            # Info text
             inputs.addTextBoxCommandInput('infoText', '', '', 5, True)
             updateInfoText(inputs)
 
-            # --- Developer group (hidden by default) ---
+            # Developer: debug export (only visible when enabled in config.ini)
             if tm_state.CONFIG.get('enable_debug_export', False):
-                devGroup = inputs.addGroupCommandInput('devGroup', 'Developer')
-                devGroup.isExpanded = False
-                devGroup.children.addBoolValueInput('exportDebug',
-                                                    'Export Debug JSON',
-                                                    True, '',
-                                                    False)
+                inputs.addBoolValueInput('exportDebug',
+                                         'Export Debug JSON (saves fixture to debug_exports/)',
+                                         True, '',
+                                         False)
 
         except Exception:
             tm_state._ui.messageBox('Failed:\n{}'.format(traceback.format_exc()))

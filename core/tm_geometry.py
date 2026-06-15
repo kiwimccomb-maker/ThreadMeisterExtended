@@ -396,6 +396,93 @@ def findChamferEdge(extrudeFeature, targetBody, sketch, circleCenter, holeDiamet
         return None
 
 
+def findGripRidgeChamferEdges(extrudeFeature, targetBody, sketch, circleCenter, nominalDiaMm):
+    """
+    Find the circular edges of the grip-ridge arcs at the hole entrance for chamfering.
+
+    Unlike the clearance circle (which is centred on the hole), the 3 grip-ridge
+    arc circles are offset at 0°, 120°, 240° at a distance of 0.6 * nominal_dia
+    from the centre. Each has radius = 0.5 * nominal_dia / 2.
+
+    This function searches ALL circular edges on the body near the sketch plane
+    and returns those matching the grip-ridge arc radius.
+
+    Args:
+        extrudeFeature: The extrude feature that created the hole
+        targetBody: The body being cut
+        sketch: The parent sketch (for plane/orientation)
+        circleCenter: 2D centre point of the hole in sketch space
+        nominalDiaMm: Nominal thread diameter in mm (used to compute arc radius)
+
+    Returns:
+        List of circular edges to chamfer (may be 0-3 edges)
+    """
+    try:
+        sketchTransform = sketch.transform
+        center3DSketch = adsk.core.Point3D.create(circleCenter.x, circleCenter.y, 0)
+        center3D = center3DSketch.copy()
+        center3D.transformBy(sketchTransform)
+
+        (origin, xAxis, yAxis, zAxis) = sketchTransform.getAsCoordinateSystem()
+
+        # Grip-ridge arc circle radius (same as in create_grip_ridge_sketch)
+        arc_radius_mm = 0.5 * nominalDiaMm / 2.0
+        expectedRadius = arc_radius_mm / 10.0  # mm → cm
+
+        # Max distance from hole centre that a grip-ridge arc centre can be
+        arc_center_dist_mm = 0.6 * nominalDiaMm
+        max_center_dist = (arc_center_dist_mm + arc_radius_mm) / 10.0  # mm → cm, generous bound
+
+        candidateEdges = []
+
+        for edge in targetBody.edges:
+            if edge.geometry.curveType != adsk.core.Curve3DTypes.Circle3DCurveType:
+                continue
+
+            edgeCircle = edge.geometry
+            edgeCenter = edgeCircle.center
+            edgeRadius = edgeCircle.radius
+            edgeNormal = edgeCircle.normal
+
+            # Match radius (grip-ridge arc radius)
+            if abs(edgeRadius - expectedRadius) > 0.001:
+                continue
+
+            # Normal must be parallel to sketch plane normal
+            dotProduct = abs(edgeNormal.x * zAxis.x + edgeNormal.y * zAxis.y + edgeNormal.z * zAxis.z)
+            if dotProduct < 0.99:
+                continue
+
+            # Edge centre must be near the sketch plane
+            vecToEdge = adsk.core.Vector3D.create(
+                edgeCenter.x - center3D.x,
+                edgeCenter.y - center3D.y,
+                edgeCenter.z - center3D.z
+            )
+            projection = vecToEdge.x * zAxis.x + vecToEdge.y * zAxis.y + vecToEdge.z * zAxis.z
+            perpDist = vecToEdge.length - abs(projection)
+            if perpDist > 0.01:
+                continue
+
+            # Edge centre must be within the grip-ridge zone (offset from hole centre)
+            distFromCenter = vecToEdge.length
+            if distFromCenter > max_center_dist:
+                continue
+
+            candidateEdges.append((edge, abs(projection)))
+
+        if len(candidateEdges) > 0:
+            candidateEdges.sort(key=lambda x: x[1])
+            return [edge for edge, _ in candidateEdges]
+
+        return []
+
+    except Exception:
+        if tm_state._ui:
+            tm_state._ui.messageBox('Error in findGripRidgeChamferEdges:\n{}'.format(traceback.format_exc()))
+        return []
+
+
 def addChamferToEdge(component, edge, chamferSize):
     """
     Add a 45-degree equal-distance chamfer to the specified edge.
