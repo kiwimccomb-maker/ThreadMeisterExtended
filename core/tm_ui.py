@@ -81,10 +81,9 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             # Grip-edge depth override (hidden unless a grip-ridge insert is selected)
             _, insertLen_default, _, _, _ = tm_state.GRIP_RIDGE_INSERTS.get(
                 lastSelected, (0, 7.0, 0, 0, 0))
-            depthInput = cfgGroup.children.addFloatSpinnerCommandInput(
-                'gripEdgeDepth', 'Depth (mm)', 'mm', 0.1, 100.0, 1)
-            depthInput.value = insertLen_default
             isGripDefault = lastSelected in tm_state.GRIP_RIDGE_INSERTS
+            depthInput = cfgGroup.children.addFloatSpinnerCommandInput(
+                'gripEdgeDepth', 'Depth (mm)', 'mm', 0.1, 100.0, insertLen_default, 1)
             depthInput.isVisible = isGripDefault
 
             # --- Options group ---
