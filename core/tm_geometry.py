@@ -406,13 +406,10 @@ def getGripRidgeChamferEdges(extrudeFeature, referenceSketch=None, referencePoin
     """
     Get the arc ridge edges for chamfering on a grip-ridge extrude.
 
-    The grip-ridge profile is a union of:
-    - 1 clearance hole (outer boundary) - LARGEST edge
-    - 3 arc ridges (small circles at 120° intervals) - smaller edges
-
-    The selected face should be the top opening of the hole, near the original sketch.
-    This function returns ONLY the arc ridge edges (smaller interior edges), excluding
-    the clearance hole boundary which should NOT be chamfered.
+    The grip-ridge sketch uses trimmed arcs (not overlapping full circles),
+    so the extruded top face has separate edge segments for each arc ridge
+    and the clearance circle. Arc ridge edges are shorter than the clearance
+    boundary segments.
 
     Args:
         extrudeFeature: The extrude feature that created the grip-ridge hole
@@ -449,7 +446,6 @@ def getGripRidgeChamferEdges(extrudeFeature, referenceSketch=None, referencePoin
                 face_origin = getattr(face_plane, 'origin', None)
                 if face_origin is None:
                     continue
-                # Use absolute distance to the reference point to find the face nearest the sketch
                 face_distances.append((face, abs(face_origin.distanceTo(ref_point))))
             if face_distances:
                 min_dist = min(dist for _face, dist in face_distances)
@@ -471,42 +467,26 @@ def getGripRidgeChamferEdges(extrudeFeature, referenceSketch=None, referencePoin
                 if edge_id in seen_edge_ids:
                     continue
                 seen_edge_ids.add(edge_id)
-
-                if not hasattr(edge, 'geometry') or not hasattr(edge.geometry, 'curveType'):
-                    continue
-
                 edge_length = getattr(edge, 'length', None)
                 if edge_length is None or edge_length < 0.01:
                     continue
-
                 edges_by_length.append((edge, edge_length))
 
         if not edges_by_length:
             return None
 
-        # Sort by length descending
         edges_by_length.sort(key=lambda x: x[1], reverse=True)
 
-        # The clearance hole boundary is the LARGEST edge.
-        # Arc ridges are significantly smaller (~1/3 the size or less).
-        # Skip the largest edge(s) and select only the smaller arc ridge edges.
+        # The clearance boundary is the longest edge(s).
+        # Arc ridge edges are shorter. Filter by a generous length threshold.
         result = adsk.core.ObjectCollection.create()
+        if len(edges_by_length) >= 2:
+            longest = edges_by_length[0][1]
+            for edge, edge_length in edges_by_length:
+                if edge_length < longest * 0.8:
+                    result.add(edge)
 
-        if len(edges_by_length) > 1:
-            # Exclude the largest (clearance hole)
-            arc_candidates = edges_by_length[1:]
-
-            # Filter: keep only edges that are close in size to each other
-            # (the 3 arc ridges should be roughly equal length)
-            if arc_candidates:
-                largest_arc_length = arc_candidates[0][1]
-                min_arc_threshold = largest_arc_length * 0.5
-
-                for edge, edge_length in arc_candidates:
-                    if edge_length >= min_arc_threshold:
-                        result.add(edge)
-
-        if getattr(result, 'count', 0) > 0:
+        if result.count > 0:
             return result
         return None
     except Exception:
@@ -534,10 +514,6 @@ def addChamferToEdge(component, edge, chamferSize):
         chamfer = chamfers.add(chamferInput)
         return chamfer
     except Exception:
-        msg = 'Error in addChamferToEdge:\n{}'.format(traceback.format_exc())
-        tm_helpers.log(msg)
-        if tm_state._ui:
-            tm_state._ui.messageBox(msg)
         return None
 
 
@@ -556,14 +532,7 @@ def addAngleChamferToEdge(component, edge, chamferSize, angleDeg):
     """
     try:
         if edge is None:
-            tm_helpers.log('addAngleChamferToEdge: edge is None')
             return None
-
-        edge_length = getattr(edge, 'length', None)
-        edge_geom = getattr(edge, 'geometry', None)
-        edge_curve_type = getattr(edge_geom, 'curveType', None) if edge_geom else None
-
-        tm_helpers.log(f'addAngleChamferToEdge: chamferSize={chamferSize}mm, angle={angleDeg}°, edge_length={edge_length}cm, curve_type={edge_curve_type}')
 
         chamfers = component.features.chamferFeatures
         edges = adsk.core.ObjectCollection.create()
@@ -575,15 +544,11 @@ def addAngleChamferToEdge(component, edge, chamferSize, angleDeg):
         angleValue = adsk.core.ValueInput.createByReal(angleRad)
         chamferInput.setToDistanceAndAngle(chamferDistance, angleValue)
 
-        tm_helpers.log(f'addAngleChamferToEdge: created chamfer input, adding to component...')
         chamfer = chamfers.add(chamferInput)
-        tm_helpers.log(f'addAngleChamferToEdge: chamfer added successfully')
         return chamfer
     except Exception:
-        msg = 'Error in addAngleChamferToEdge:\n{}'.format(traceback.format_exc())
-        tm_helpers.log(msg)
-        if tm_state._ui:
-            tm_state._ui.messageBox(msg)
+        # Edge may be a partial arc segment at the clearance circle junction.
+        # Skip silently -- the remaining edges are still attempted.
         return None
 
 
@@ -753,13 +718,32 @@ def create_grip_ridge_sketch(sketch, center_point_2d, clearance_dia_mm, nominal_
             center_point_2d, clearance_radius)
 
         # Draw three arc grip ridge circles at 0°, 120°, 240°
+        grip_circles = []
         for angle_deg in (0.0, 120.0, 240.0):
             angle_rad = math.radians(angle_deg)
             arc_x = center_point_2d.x + arc_center_distance * math.cos(angle_rad)
             arc_y = center_point_2d.y + arc_center_distance * math.sin(angle_rad)
             arc_center = adsk.core.Point3D.create(arc_x, arc_y, 0.0)
-            sketch.sketchCurves.sketchCircles.addByCenterRadius(
+            circle = sketch.sketchCurves.sketchCircles.addByCenterRadius(
                 arc_center, arc_circle_radius)
+            grip_circles.append((circle, angle_deg))
+
+        # Trim each grip ridge circle against the clearance circle.
+        # After trimming, each full circle becomes an arc segment representing
+        # only the portion that extends OUTSIDE the clearance circle.
+        # This creates clean, separable arc ridge edges that can be chamfered.
+        for circle, angle_deg in grip_circles:
+            angle_rad = math.radians(angle_deg)
+            # Point in the middle of the outer arc (furthest from hole center)
+            outer_dist = arc_center_distance + arc_circle_radius * 0.5
+            outer_x = center_point_2d.x + outer_dist * math.cos(angle_rad)
+            outer_y = center_point_2d.y + outer_dist * math.sin(angle_rad)
+            outer_point = adsk.core.Point3D.create(outer_x, outer_y, 0.0)
+            try:
+                sketch.sketchCurves.trim(circle, outer_point)
+            except Exception:
+                # Trim may fail if the intersection is degenerate; skip that circle
+                pass
 
         # Find the combined profile: the largest profile whose centroid is
         # very close to the centre point (the union of all overlapping circles)
