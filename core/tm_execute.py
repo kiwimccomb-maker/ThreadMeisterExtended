@@ -50,11 +50,13 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
 
             if is_grip_ridge:
                 clearanceDia, configInsertLen, minWall, nominalDia, gripEdgeChamfer = tm_state.GRIP_RIDGE_INSERTS[insertName]
-                # Pre-calculate the default total depth (insert + extra + chamfer)
-                configDepth = configInsertLen + tm_state.CONFIG['blind_hole_extra_depth'] + tm_state.CONFIG['chamfer_size']
+                # Pre-calculate the default total depth (insert + extra depth)
+                # Chamfer is applied to the edge AFTER extrusion, not part of hole depth
+                configDepth = configInsertLen + tm_state.CONFIG['blind_hole_extra_depth']
                 # Use spinner value if present and visible, otherwise calculated default
+                # Note: gripEdgeDepthInput.value is in cm (Fusion's internal unit), convert to mm
                 if gripEdgeDepthInput is not None and gripEdgeDepthInput.isVisible:
-                    insertLen = gripEdgeDepthInput.value
+                    insertLen = gripEdgeDepthInput.value * 10.0  # cm -> mm
                 else:
                     insertLen = configDepth
                 holeDia = clearanceDia
@@ -156,8 +158,11 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
 
                 if isBlindHole:
                     if is_grip_ridge:
-                        # Grip-ridge: spinner value IS the total hole depth in mm
-                        depth_mm = gripEdgeDepthInput.value if (gripEdgeDepthInput is not None and gripEdgeDepthInput.isVisible) else configDepth
+                        # Grip-ridge: spinner value is in cm (Fusion's internal unit), convert to mm
+                        if gripEdgeDepthInput is not None and gripEdgeDepthInput.isVisible:
+                            depth_mm = gripEdgeDepthInput.value * 10.0  # cm -> mm
+                        else:
+                            depth_mm = configDepth  # already in mm
                     else:
                         # Standard: insert length + extra depth + chamfer
                         chamfer = tm_state.CONFIG['chamfer_size'] if includeChamfer else 0.0

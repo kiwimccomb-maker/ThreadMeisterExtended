@@ -19,6 +19,10 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             tm_config.load_config()
 
             cmd = args.command
+            
+            # Set dialog size to properly display all labels and options
+            cmd.setDialogMinimumWidth(550)
+            cmd.setDialogMinimumHeight(600)
 
             onExecute = CommandExecuteHandler()
             cmd.execute.add(onExecute)

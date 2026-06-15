@@ -410,9 +410,9 @@ def getGripRidgeChamferEdges(extrudeFeature):
     - 1 clearance hole (outer boundary) - LARGEST edge
     - 3 arc ridges (small circles at 120° intervals) - smaller edges
 
-    After extrusion, the top face has edges from both. This function returns
-    ONLY the arc ridge edges (smaller interior edges), excluding the clearance
-    hole boundary which should NOT be chamfered.
+    After extrusion downward from the surface, the top opening (startFaces) has edges
+    from both. This function returns ONLY the arc ridge edges (smaller interior edges),
+    excluding the clearance hole boundary which should NOT be chamfered.
 
     Args:
         extrudeFeature: The extrude feature that created the grip-ridge hole
