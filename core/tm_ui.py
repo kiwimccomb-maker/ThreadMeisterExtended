@@ -33,34 +33,36 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
 
             inputs = cmd.commandInputs
 
-            # Target body selection
-            bodySelect = inputs.addSelectionInput('bodySelect', 'Select Target Body',
-                                                  'Select the body to add insert holes to')
+            # --- Selection group ---
+            selGroup = inputs.addGroupCommandInput('selectionGroup', 'Selection')
+
+            bodySelect = selGroup.children.addSelectionInput('bodySelect', 'Target Body',
+                                                             'Select the body to add insert holes to')
             bodySelect.addSelectionFilter('SolidBodies')
             bodySelect.setSelectionLimits(1, 1)
 
-            # Sketch point selection
-            pointSelect = inputs.addSelectionInput('pointSelect', 'Select Sketch Point(s)',
-                                                   'Select line endpoint')
+            pointSelect = selGroup.children.addSelectionInput('pointSelect', 'Sketch Point(s)',
+                                                              'Select sketch point(s) on a planar face')
             pointSelect.addSelectionFilter('SketchPoints')
             pointSelect.setSelectionLimits(1, 0)
 
+            # --- Insert configuration group ---
+            cfgGroup = inputs.addGroupCommandInput('configGroup', 'Insert Configuration')
+
             # Insert size dropdown
-            insertDropdown = inputs.addDropDownCommandInput('insertSize', 'Insert Size',
-                                                           adsk.core.DropDownStyles.TextListDropDownStyle)
+            insertDropdown = cfgGroup.children.addDropDownCommandInput('insertSize', 'Insert Size',
+                                                                       adsk.core.DropDownStyles.TextListDropDownStyle)
             insertList = insertDropdown.listItems
 
             lastSelected = tm_state.CONFIG.get('last_selected_insert', 'M3 x 5.7mm (standard)')
             foundLastSelected = False
 
-            # Standard heat-set inserts
             for name in tm_state.INSERT_SPECS.keys():
                 isSelected = (name == lastSelected)
                 if isSelected:
                     foundLastSelected = True
                 insertList.add(name, isSelected)
 
-            # Grip-ridge inserts (with visual separator)
             for name in tm_state.GRIP_RIDGE_INSERTS.keys():
                 isSelected = (name == lastSelected)
                 if isSelected:
@@ -71,39 +73,45 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
                 insertList.item(0).isSelected = True
 
             # Hole type
-            holeTypeGroup = inputs.addRadioButtonGroupCommandInput('holeType', 'Hole Type')
+            holeTypeGroup = cfgGroup.children.addRadioButtonGroupCommandInput('holeType', 'Hole Type')
             saved_is_blind = tm_state.CONFIG.get('hole_type_blind', True)
             holeTypeGroup.listItems.add('Blind Hole', saved_is_blind)
             holeTypeGroup.listItems.add('Through Hole', not saved_is_blind)
 
-            # Chamfer option
-            inputs.addBoolValueInput('addChamfer',
-                                     f'Add Chamfer ({tm_state.CONFIG["chamfer_size"]}mm)',
-                                     True, '',
-                                     tm_state.CONFIG['chamfer_enabled_default'])
+            # Grip-edge depth override (hidden unless a grip-ridge insert is selected)
+            _, insertLen_default, _, _, _ = tm_state.GRIP_RIDGE_INSERTS.get(
+                lastSelected, (0, 7.0, 0, 0, 0))
+            depthInput = cfgGroup.children.addFloatSpinnerCommandInput(
+                'gripEdgeDepth', 'Depth (mm)', 'mm', 0.1, 100.0, 1)
+            depthInput.value = insertLen_default
+            isGripDefault = lastSelected in tm_state.GRIP_RIDGE_INSERTS
+            depthInput.isVisible = isGripDefault
 
-            # Bottom radius option
-            inputs.addBoolValueInput('addBottomRadius',
-                                     f'Add Fillet Bottom ({tm_state.CONFIG["bottom_radius_size"]}mm)',
-                                     True, '',
-                                     tm_state.CONFIG['bottom_radius_enabled_default'])
+            # --- Options group ---
+            optGroup = inputs.addGroupCommandInput('optionsGroup', 'Options')
 
-            # Show success message option
-            inputs.addBoolValueInput('showSuccessMessage',
-                                     'Show Success Message',
-                                     True, '',
-                                     tm_state.CONFIG['show_success_message'])
+            optGroup.children.addBoolValueInput('addChamfer',
+                                                f'Add Chamfer ({tm_state.CONFIG["chamfer_size"]}mm)',
+                                                True, '',
+                                                tm_state.CONFIG['chamfer_enabled_default'])
 
-            # Debug export button — only visible when enabled in config.ini
-            if tm_state.CONFIG.get('enable_debug_export', False):
-                inputs.addBoolValueInput('exportDebug',
-                                        'Export Debug JSON (saves fixture to debug_exports/)',
-                                        True, '',
-                                        False)
+            optGroup.children.addBoolValueInput('addBottomRadius',
+                                                f'Add Bottom Fillet ({tm_state.CONFIG["bottom_radius_size"]}mm)',
+                                                True, '',
+                                                tm_state.CONFIG['bottom_radius_enabled_default'])
 
-            # Info text
-            inputs.addTextBoxCommandInput('infoText', '', '', 4, True)
+            # --- Info text ---
+            inputs.addTextBoxCommandInput('infoText', '', '', 5, True)
             updateInfoText(inputs)
+
+            # --- Developer group (hidden by default) ---
+            if tm_state.CONFIG.get('enable_debug_export', False):
+                devGroup = inputs.addGroupCommandInput('devGroup', 'Developer')
+                devGroup.isExpanded = False
+                devGroup.children.addBoolValueInput('exportDebug',
+                                                    'Export Debug JSON',
+                                                    True, '',
+                                                    False)
 
         except Exception:
             tm_state._ui.messageBox('Failed:\n{}'.format(traceback.format_exc()))
@@ -123,7 +131,19 @@ class InputChangedHandler(adsk.core.InputChangedEventHandler):
                     pointSelect.isEnabled = True
                     pointSelect.hasFocus = True
 
-            if changedInput.id in ('insertSize', 'holeType', 'addChamfer'):
+            # Show/hide grip-edge depth spinner based on insert type
+            if changedInput.id == 'insertSize':
+                insertSize = inputs.itemById('insertSize')
+                depthInput = inputs.itemById('gripEdgeDepth')
+                insertName = insertSize.selectedItem.name
+                isGrip = insertName in tm_state.GRIP_RIDGE_INSERTS
+                if depthInput:
+                    depthInput.isVisible = isGrip
+                    if isGrip:
+                        _, insertLen, _, _, _ = tm_state.GRIP_RIDGE_INSERTS[insertName]
+                        depthInput.value = insertLen
+
+            if changedInput.id in ('insertSize', 'holeType', 'addChamfer', 'gripEdgeDepth'):
                 updateInfoText(inputs)
 
         except Exception:
@@ -159,9 +179,16 @@ def updateInfoText(inputs):
         is_grip_ridge = insertName in tm_state.GRIP_RIDGE_INSERTS
 
         if is_grip_ridge:
-            clearanceDia, insertLen, minWall, nominalDia = tm_state.GRIP_RIDGE_INSERTS[insertName]
+            clearanceDia, configDepth, minWall, nominalDia, gripEdgeChamfer = tm_state.GRIP_RIDGE_INSERTS[insertName]
             holeDia = clearanceDia
             arc_dia = 0.5 * nominalDia
+
+            # Use spinner value if visible, otherwise config default
+            depthInput = inputs.itemById('gripEdgeDepth')
+            if depthInput and depthInput.isVisible:
+                insertLen = depthInput.value
+            else:
+                insertLen = configDepth
         else:
             holeDia, insertLen, minWall = tm_state.INSERT_SPECS[insertName]
 
@@ -173,25 +200,26 @@ def updateInfoText(inputs):
             chamfer = tm_state.CONFIG['chamfer_size'] if chamferOn else 0.0
             holeDepth = calc_blind_hole_depth_mm(insertLen, extra, chamfer)
             if chamferOn:
-                depthStr = f'{holeDepth:.1f} mm ({insertLen} + {extra} extra + {tm_state.CONFIG["chamfer_size"]} chamfer)'
+                depthStr = f'{holeDepth:.1f} mm ({insertLen} + {extra} + {tm_state.CONFIG["chamfer_size"]})'
             else:
-                depthStr = f'{holeDepth:.1f} mm ({insertLen} + {extra} extra)'
+                depthStr = f'{holeDepth:.1f} mm ({insertLen} + {extra})'
         else:
             depthStr = 'Through body'
 
         if is_grip_ridge:
-            info = (f'<b>Grip-Ridge Insert Specifications:</b><br/>' +
-                    f'Clearance hole: {holeDia:.1f} mm (M{nominalDia:.1f})<br/>' +
-                    f'Arc ridges: 3x at 120°, dia = {arc_dia:.1f} mm<br/>' +
-                    f'Insert depth: {insertLen:.1f} mm<br/>' +
+            grip_chamfer_angle = tm_state.CONFIG.get('grip_chamfer_angle', 60)
+            chamfer_info = f'{tm_state.CONFIG["chamfer_size"]}mm @ {grip_chamfer_angle}°' if chamferOn else 'Off'
+            info = (f'<b>{insertName}</b><br/>' +
+                    f'Hole: {holeDia:.1f} mm  ·  Depth: {insertLen:.1f} mm<br/>' +
+                    f'Ridges: 3× Ø{arc_dia:.1f} mm  ·  Grip chamfer: {gripEdgeChamfer} mm<br/>' +
+                    f'Chamfer: {chamfer_info}<br/>' +
                     f'Hole depth: {depthStr}<br/>' +
-                    f'Min wall thickness: {minWall} mm')
+                    f'Min wall: {minWall} mm')
         else:
-            info = (f'<b>Specifications:</b><br/>' +
-                    f'Hole diameter: {holeDia} mm<br/>' +
-                    f'Insert length: {insertLen} mm<br/>' +
+            info = (f'<b>{insertName}</b><br/>' +
+                    f'Hole: {holeDia} mm  ·  Depth: {insertLen} mm<br/>' +
                     f'Hole depth: {depthStr}<br/>' +
-                    f'Min wall thickness: {minWall} mm')
+                    f'Min wall: {minWall} mm')
 
         infoText.formattedText = info
 

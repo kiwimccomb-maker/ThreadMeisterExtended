@@ -398,7 +398,7 @@ def findChamferEdge(extrudeFeature, targetBody, sketch, circleCenter, holeDiamet
 
 def addChamferToEdge(component, edge, chamferSize):
     """
-    Add a chamfer to the specified edge.
+    Add a 45-degree equal-distance chamfer to the specified edge.
 
     Returns:
         The chamfer feature, or None if failed
@@ -415,6 +415,36 @@ def addChamferToEdge(component, edge, chamferSize):
     except Exception:
         if tm_state._ui:
             tm_state._ui.messageBox('Error in addChamferToEdge:\n{}'.format(traceback.format_exc()))
+        return None
+
+
+def addAngleChamferToEdge(component, edge, chamferSize, angleDeg):
+    """
+    Add a chamfer with a specified distance and angle to the specified edge.
+
+    Args:
+        component: Fusion 360 Component
+        edge: The edge to chamfer
+        chamferSize: Distance along the face in mm
+        angleDeg: Chamfer angle in degrees (measured from the face plane)
+
+    Returns:
+        The chamfer feature, or None if failed
+    """
+    try:
+        chamfers = component.features.chamferFeatures
+        edges = adsk.core.ObjectCollection.create()
+        edges.add(edge)
+        chamferInput = chamfers.createInput(edges, True)
+        chamferDistance = adsk.core.ValueInput.createByReal(chamferSize / 10.0)
+        angleRad = math.radians(angleDeg)
+        angleValue = adsk.core.ValueInput.createByReal(angleRad)
+        chamferInput.setToDistanceAndAngle(chamferDistance, angleValue)
+        chamfer = chamfers.add(chamferInput)
+        return chamfer
+    except Exception:
+        if tm_state._ui:
+            tm_state._ui.messageBox('Error in addAngleChamferToEdge:\n{}'.format(traceback.format_exc()))
         return None
 
 

@@ -23,20 +23,20 @@ M_SERIES_DATA = {
     'M10':   (10.0, 10.5),
 }
 
-# Grip-ridge insert specifications: name -> (clearance_dia_mm, insert_depth_mm, min_wall_mm, nominal_dia_mm)
+# Grip-ridge insert specifications: name -> (clearance_dia_mm, insert_depth_mm, min_wall_mm, nominal_dia_mm, grip_edge_chamfer_mm)
 # Populated at startup by tm_config.load_config(); defaults are set here as fallback.
 # Arc grip ridges: 3 arcs at 120°, each arc circle dia = 0.5 * nominal_dia,
 # centred at distance 0.6 * nominal_dia from the hole centre.
 GRIP_RIDGE_INSERTS = {
-    'M1.6 Grip':  (1.7, 4.0, 1.0, 1.6),
-    'M2 Grip':    (2.2, 5.0, 1.2, 2.0),
-    'M2.5 Grip':  (2.7, 6.0, 1.5, 2.5),
-    'M3 Grip':    (3.2, 7.0, 1.6, 3.0),
-    'M4 Grip':    (4.3, 8.0, 2.0, 4.0),
-    'M5 Grip':    (5.3, 9.0, 2.5, 5.0),
-    'M6 Grip':    (6.4, 12.0, 3.0, 6.0),
-    'M8 Grip':    (8.4, 14.0, 4.0, 8.0),
-    'M10 Grip':   (10.5, 16.0, 5.0, 10.0),
+    'M1.6 Grip':  (1.7, 4.0, 1.0, 1.6, 0.3),
+    'M2 Grip':    (2.2, 5.0, 1.2, 2.0, 0.3),
+    'M2.5 Grip':  (2.7, 6.0, 1.5, 2.5, 0.4),
+    'M3 Grip':    (3.2, 7.0, 1.6, 3.0, 0.5),
+    'M4 Grip':    (4.3, 8.0, 2.0, 4.0, 0.5),
+    'M5 Grip':    (5.3, 9.0, 2.5, 5.0, 0.6),
+    'M6 Grip':    (6.4, 12.0, 3.0, 6.0, 0.6),
+    'M8 Grip':    (8.4, 14.0, 4.0, 8.0, 0.8),
+    'M10 Grip':   (10.5, 16.0, 5.0, 10.0, 1.0),
 }
 
 # Insert specifications: name -> (hole_diameter_mm, insert_length_mm, min_wall_mm)
@@ -69,6 +69,7 @@ CONFIG = {
     'enable_debug_export': False,
     'hole_type_blind': True,
     'last_selected_insert': 'M3 x 5.7mm (standard)',
+    'grip_chamfer_angle': 60,
 }
 
 # Event handler references (kept in scope to prevent garbage collection)
