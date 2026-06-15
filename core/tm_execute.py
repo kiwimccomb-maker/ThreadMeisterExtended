@@ -185,7 +185,8 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                     if is_grip_ridge:
                         # Grip-ridge: chamfer arc ridge edges with per-insert chamfer size
                         grip_chamfer_angle = tm_state.CONFIG.get('grip_chamfer_angle', 60)
-                        gripEdges = getGripRidgeChamferEdges(extrude)
+                        grip_center_point = adsk.core.Point3D.create(center2d.x, center2d.y, 0)
+                        gripEdges = getGripRidgeChamferEdges(extrude, parentSketch, grip_center_point)
                         if gripEdges and gripEdges.count > 0:
                             for i in range(gripEdges.count):
                                 addAngleChamferToEdge(

@@ -402,7 +402,7 @@ def findChamferEdge(extrudeFeature, targetBody, sketch, circleCenter, holeDiamet
         return None
 
 
-def getGripRidgeChamferEdges(extrudeFeature):
+def getGripRidgeChamferEdges(extrudeFeature, referenceSketch=None, referencePoint2d=None):
     """
     Get the arc ridge edges for chamfering on a grip-ridge extrude.
 
@@ -410,12 +410,14 @@ def getGripRidgeChamferEdges(extrudeFeature):
     - 1 clearance hole (outer boundary) - LARGEST edge
     - 3 arc ridges (small circles at 120° intervals) - smaller edges
 
-    After extrusion downward from the surface, the top opening (startFaces) has edges
-    from both. This function returns ONLY the arc ridge edges (smaller interior edges),
-    excluding the clearance hole boundary which should NOT be chamfered.
+    The selected face should be the top opening of the hole, near the original sketch.
+    This function returns ONLY the arc ridge edges (smaller interior edges), excluding
+    the clearance hole boundary which should NOT be chamfered.
 
     Args:
         extrudeFeature: The extrude feature that created the grip-ridge hole
+        referenceSketch: Optional sketch on the hole plane used to identify the top face.
+        referencePoint2d: Optional 2D point in sketch coordinates near the hole center.
 
     Returns:
         adsk.core.ObjectCollection of arc ridge edges, or None if not found.
@@ -423,15 +425,44 @@ def getGripRidgeChamferEdges(extrudeFeature):
     try:
         edges_by_length = []
 
-        start_faces = getattr(extrudeFeature, 'startFaces', None)
+        def get_reference_point():
+            if referenceSketch is not None and referencePoint2d is not None:
+                ref_point = adsk.core.Point3D.create(referencePoint2d.x,
+                                                     referencePoint2d.y,
+                                                     0.0)
+                ref_point.transformBy(referenceSketch.transform)
+                return ref_point
+            return None
+
+        def planar_faces():
+            return [face for face in extrudeFeature.faces
+                    if hasattr(face, 'geometry') and
+                    face.geometry.surfaceType == adsk.core.SurfaceTypes.PlaneSurfaceType]
+
+        ref_point = get_reference_point()
         candidate_faces = []
-        if start_faces is not None and getattr(start_faces, 'count', 0) > 0:
-            for i in range(start_faces.count):
-                candidate_faces.append(start_faces.item(i))
-        else:
-            for face in extrudeFeature.faces:
-                if face.geometry.surfaceType == adsk.core.SurfaceTypes.PlaneSurfaceType:
-                    candidate_faces.append(face)
+
+        if ref_point is not None:
+            face_distances = []
+            for face in planar_faces():
+                face_plane = face.geometry
+                face_origin = getattr(face_plane, 'origin', None)
+                if face_origin is None:
+                    continue
+                # Use absolute distance to the reference point to find the face nearest the sketch
+                face_distances.append((face, abs(face_origin.distanceTo(ref_point))))
+            if face_distances:
+                min_dist = min(dist for _face, dist in face_distances)
+                tolerance = 0.001
+                candidate_faces = [face for face, dist in face_distances if dist <= min_dist + tolerance]
+
+        if not candidate_faces:
+            start_faces = getattr(extrudeFeature, 'startFaces', None)
+            if start_faces is not None and getattr(start_faces, 'count', 0) > 0:
+                candidate_faces = [start_faces.item(i) for i in range(start_faces.count)]
+
+        if not candidate_faces:
+            candidate_faces = planar_faces()
 
         seen_edge_ids = set()
         for face in candidate_faces:

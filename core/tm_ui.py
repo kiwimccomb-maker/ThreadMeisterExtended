@@ -21,7 +21,7 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             cmd = args.command
             
             # Set dialog size to properly display all labels and options
-            cmd.setDialogMinimumSize(550, 600)
+            cmd.setDialogMinimumSize(350, 600)
 
             onExecute = CommandExecuteHandler()
             cmd.execute.add(onExecute)
@@ -98,7 +98,7 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
 
             # Chamfer option
             inputs.addBoolValueInput('addChamfer',
-                                     f'Add Chamfer ({tm_state.CONFIG["chamfer_size"]}mm)',
+                                     'Add Chamfer',
                                      True, '',
                                      tm_state.CONFIG['chamfer_enabled_default'])
 
@@ -192,11 +192,11 @@ def updateInfoText(inputs):
             holeDia = clearanceDia
             arc_dia = 0.5 * nominalDia
 
-            # Use spinner value if visible (it's the total hole depth),
-            # otherwise fall back to the calculated default
+            # Use spinner value if visible (it's stored in cm internally),
+            # otherwise fall back to the calculated default in mm
             depthInput = inputs.itemById('gripEdgeDepth')
             if depthInput and depthInput.isVisible:
-                totalDepth = depthInput.value
+                totalDepth = depthInput.value * 10.0
             else:
                 totalDepth = (configInsertLen
                               + tm_state.CONFIG['blind_hole_extra_depth']
