@@ -450,6 +450,7 @@ def getGripRidgeChamferEdges(extrudeFeature, targetBody, referenceSketch, refere
         parallel_count = 0
         coplanar_count = 0
         radius_match_count = 0
+        coplanar_radii = []  # Track radii of coplanar edges for diagnostics
 
         for edge in targetBody.edges:
             # Accept both Arc3D and Circle3D (trimmed circles may be either type)
@@ -488,6 +489,7 @@ def getGripRidgeChamferEdges(extrudeFeature, targetBody, referenceSketch, refere
             if abs(projection) > plane_tol or perp_dist > plane_tol:
                 continue
             coplanar_count += 1
+            coplanar_radii.append(edge_radius)
 
             # 3. Match radius against expected grip ridge radius
             tm_helpers.log('  Coplanar edge: radius={:.6f} cm (expected={:.6f}, diff={:.6f})'.format(
@@ -499,11 +501,14 @@ def getGripRidgeChamferEdges(extrudeFeature, targetBody, referenceSketch, refere
 
             matching_edges.append(edge)
 
+        # Build coplanar radii string for diagnostics
+        coplanar_radii_str = ', '.join('{:.6f}'.format(r) for r in coplanar_radii)
+
         # Diagnostic summary
         tm_helpers.log('GripRidgeChamfer diagnostics:')
         tm_helpers.log('  Arc edges={}, Circle edges={}'.format(arc_count, circle_count))
         tm_helpers.log('  Parallel to plane={}'.format(parallel_count))
-        tm_helpers.log('  Coplanar (dist~0)={}'.format(coplanar_count))
+        tm_helpers.log('  Coplanar (dist~0)={}, radii=[{}]'.format(coplanar_count, coplanar_radii_str))
         tm_helpers.log('  Radius match={}'.format(radius_match_count))
         tm_helpers.log('  Total matching={}'.format(len(matching_edges)))
         tm_helpers.log('  Expected radius={} cm (nominal_dia={} mm)'.format(
@@ -514,9 +519,10 @@ def getGripRidgeChamferEdges(extrudeFeature, targetBody, referenceSketch, refere
                 tm_state._ui.messageBox(
                     'Grip ridge chamfer: found {} matching edges (need 3).\n'
                     'Expected radius: {:.4f} cm\n'
-                    'Arc edges: {}, Circle edges: {}, Parallel: {}, Coplanar: {}, Radius match: {}\n'
-                    'Check tm_helpers log for details.'.format(
+                    'Coplanar edge radii: [{}] cm\n'
+                    'Arc={}, Circle={}, Parallel={}, Coplanar={}, RadiusMatch={}'.format(
                         len(matching_edges), expected_grip_radius_cm,
+                        coplanar_radii_str,
                         arc_count, circle_count, parallel_count, coplanar_count, radius_match_count))
             return None
 
