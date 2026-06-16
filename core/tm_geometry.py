@@ -402,28 +402,30 @@ def findChamferEdge(extrudeFeature, targetBody, sketch, circleCenter, holeDiamet
         return None
 
 
-def getGripRidgeChamferEdges(extrudeFeature, targetBody, referenceSketch=None, referencePoint2d=None):
+def getGripRidgeChamferEdges(extrudeFeature, targetBody, referenceSketch=None, referencePoint2d=None, nominal_dia_mm=None):
     """
-    Get the top face edges for chamfering on a grip-ridge extrude.
+    Get the grip ridge arc edges for chamfering on a grip-ridge extrude.
 
     The grip-ridge sketch uses a non-circular profile. Chamfering should apply
-    to every edge around the entrance/top face, including the clearance-hole
-    boundary and the ridge arcs.
+    only to the 3 grip ridge arcs that protrude into the hole — NOT the
+    clearance hole edge.
 
-    Strategy (mirrors findChamferEdge but for multiple edges):
+    Strategy:
     1. Get the sketch plane's 3D position and normal
-    2. Search targetBody.edges for circular/arc edges coplanar with the sketch plane
-    3. Filter edges that are near the sketch plane (entrance side)
-    4. Return all matching edges as an ObjectCollection
+    2. Search targetBody.edges for arc edges coplanar with the sketch plane
+    3. Filter arcs by radius: keep only those matching the grip ridge radius
+       (0.25 * nominal_dia), exclude the clearance hole radius
+    4. Return matching grip ridge edges as an ObjectCollection
 
     Args:
-        extrudeFeature: The extrude feature that created the grip-ridge hole (unused, kept for API compatibility)
+        extrudeFeature: The extrude feature (unused, kept for API compatibility)
         targetBody: The body that was cut (edges are searched here)
         referenceSketch: Sketch on the hole plane used to identify the top face.
         referencePoint2d: 2D point in sketch coordinates near the hole center.
+        nominal_dia_mm: Nominal thread diameter in mm (used to compute expected grip ridge radius).
 
     Returns:
-        adsk.core.ObjectCollection of top face edges, or None if not found.
+        adsk.core.ObjectCollection of grip ridge edges, or None if not found.
     """
     try:
         if referenceSketch is None or referencePoint2d is None:
@@ -438,29 +440,35 @@ def getGripRidgeChamferEdges(extrudeFeature, targetBody, referenceSketch=None, r
 
         (origin, xAxis, yAxis, zAxis) = referenceSketch.transform.getAsCoordinateSystem()
 
-        # Collect all circular/arc edges on the target body that are coplanar
-        # with the sketch plane and near the hole center
+        # Collect all arc edges on the target body that are coplanar with the
+        # sketch plane and match the grip ridge radius (not the clearance hole).
+        # Grip ridge arc radius = 0.5 * nominal_dia / 2 = 0.25 * nominal_dia (in mm).
         candidateEdges = []
         tolerance = 0.01  # 1cm tolerance for edge detection
 
+        # Compute expected grip ridge radius in cm (Fusion internal units)
+        expected_grip_radius_cm = None
+        if nominal_dia_mm is not None:
+            expected_grip_radius_cm = (0.5 * nominal_dia_mm) / 2.0 / 10.0
+
         for edge in targetBody.edges:
-            if edge.geometry.curveType not in (
-                adsk.core.Curve3DTypes.Circle3DCurveType,
-                adsk.core.Curve3DTypes.Arc3DCurveType
-            ):
+            # Only select arc edges (the trimmed grip ridges), not full circles
+            # (the clearance hole). After trimming in create_grip_ridge_sketch,
+            # grip ridges become Arc3D edges while the clearance hole stays Circle3D.
+            if edge.geometry.curveType != adsk.core.Curve3DTypes.Arc3DCurveType:
                 continue
 
             edgeCurve = edge.geometry
+            edgeCenter = edgeCurve.center
+            edgeNormal = edgeCurve.normal
+            edgeRadius = edgeCurve.radius
 
-            # For circles: check center
-            if edgeCurve.curveType == adsk.core.Curve3DTypes.Circle3DCurveType:
-                edgeCenter = edgeCurve.center
-                edgeNormal = edgeCurve.normal
-            elif edgeCurve.curveType == adsk.core.Curve3DTypes.Arc3DCurveType:
-                edgeCenter = edgeCurve.center
-                edgeNormal = edgeCurve.normal
-            else:
-                continue
+            # If we know the expected grip ridge radius, filter by radius match.
+            # This excludes the clearance hole arcs (different radius).
+            if expected_grip_radius_cm is not None:
+                radius_diff = abs(edgeRadius - expected_grip_radius_cm)
+                if radius_diff > 0.001:  # 0.01mm tolerance
+                    continue
 
             # Check if edge plane is parallel to sketch plane
             dotProduct = abs(edgeNormal.x * zAxis.x +

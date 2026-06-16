@@ -352,106 +352,161 @@ class TestFilterByCurvePoints:
         assert len(result) == 1
         assert result[0][0] == profile
 
-    def test_getGripRidgeChamferEdges_includes_all_top_edges(self):
-        """Test that all top face edges are returned, including the clearance hole."""
-        # Create mock edges with proper geometry attributes
-        clearance_hole = FakeEdge(
+    def test_getGripRidgeChamferEdges_selects_grip_ridge_arcs_not_clearance(self):
+        """Test that only grip ridge arcs are returned, excluding the clearance hole."""
+        # M3 grip: nominal_dia=3.0mm -> grip_radius = 0.5*3.0/2 = 0.75mm = 0.075cm
+        grip_radius_cm = 0.075
+        # Clearance hole radius would be different (e.g., 3.2mm/2 = 1.6mm = 0.16cm)
+        clearance_radius_cm = 0.16
+
+        grip_arc1 = FakeEdge(
+            curveType='Arc3DCurveType',
+            length=2.0,
+            geometry=SimpleNamespace(
+                curveType='Arc3DCurveType',
+                center=make_point(0.5, 0.0, 0.0),
+                normal=make_point(0.0, 0.0, 1.0),
+                radius=grip_radius_cm
+            )
+        )
+        grip_arc2 = FakeEdge(
+            curveType='Arc3DCurveType',
+            length=2.0,
+            geometry=SimpleNamespace(
+                curveType='Arc3DCurveType',
+                center=make_point(-0.25, 0.43, 0.0),
+                normal=make_point(0.0, 0.0, 1.0),
+                radius=grip_radius_cm
+            )
+        )
+        grip_arc3 = FakeEdge(
+            curveType='Arc3DCurveType',
+            length=2.0,
+            geometry=SimpleNamespace(
+                curveType='Arc3DCurveType',
+                center=make_point(-0.25, -0.43, 0.0),
+                normal=make_point(0.0, 0.0, 1.0),
+                radius=grip_radius_cm
+            )
+        )
+        # Clearance hole is a full circle (not an arc) - should be excluded
+        clearance_circle = FakeEdge(
             curveType='Circle3DCurveType',
             length=10.0,
             geometry=SimpleNamespace(
                 curveType='Circle3DCurveType',
                 center=make_point(0.0, 0.0, 0.0),
-                normal=make_point(0.0, 0.0, 1.0)
-            )
-        )
-        arc_edge1 = FakeEdge(
-            curveType='Circle3DCurveType',
-            length=2.0,
-            geometry=SimpleNamespace(
-                curveType='Circle3DCurveType',
-                center=make_point(0.5, 0.0, 0.0),
-                normal=make_point(0.0, 0.0, 1.0)
-            )
-        )
-        arc_edge2 = FakeEdge(
-            curveType='Circle3DCurveType',
-            length=2.0,
-            geometry=SimpleNamespace(
-                curveType='Circle3DCurveType',
-                center=make_point(-0.25, 0.43, 0.0),
-                normal=make_point(0.0, 0.0, 1.0)
-            )
-        )
-        arc_edge3 = FakeEdge(
-            curveType='Circle3DCurveType',
-            length=2.0,
-            geometry=SimpleNamespace(
-                curveType='Circle3DCurveType',
-                center=make_point(-0.25, -0.43, 0.0),
-                normal=make_point(0.0, 0.0, 1.0)
+                normal=make_point(0.0, 0.0, 1.0),
+                radius=clearance_radius_cm
             )
         )
 
         target_body = MagicMock()
-        target_body.edges = [clearance_hole, arc_edge1, arc_edge2, arc_edge3]
+        target_body.edges = [clearance_circle, grip_arc1, grip_arc2, grip_arc3]
 
         extrude = MagicMock()
         reference_sketch = make_reference_sketch()
         reference_point = make_point(0.0, 0.0, 0.0)
 
-        edges = getGripRidgeChamferEdges(extrude, target_body, reference_sketch, reference_point)
+        edges = getGripRidgeChamferEdges(extrude, target_body, reference_sketch, reference_point, nominal_dia_mm=3.0)
 
-        # Should return all top edges coplanar with sketch plane
+        # Should return only the 3 grip ridge arcs, not the clearance circle
         assert edges is not None
-        assert edges.count == 4
-        assert set(edges._items) == {clearance_hole, arc_edge1, arc_edge2, arc_edge3}
+        assert edges.count == 3
+        assert set(edges._items) == {grip_arc1, grip_arc2, grip_arc3}
+        assert clearance_circle not in edges._items
 
     def test_getGripRidgeChamferEdges_filters_by_sketch_plane(self):
-        """Test that only edges coplanar with the sketch plane are returned."""
-        # Edge on the sketch plane (z=0)
-        top_edge1 = FakeEdge(
-            curveType='Circle3DCurveType',
-            length=9.6,
+        """Test that only arcs coplanar with the sketch plane are returned."""
+        grip_radius_cm = 0.075
+
+        top_arc1 = FakeEdge(
+            curveType='Arc3DCurveType',
+            length=2.0,
             geometry=SimpleNamespace(
-                curveType='Circle3DCurveType',
+                curveType='Arc3DCurveType',
                 center=make_point(0.0, 0.0, 0.0),
-                normal=make_point(0.0, 0.0, 1.0)
+                normal=make_point(0.0, 0.0, 1.0),
+                radius=grip_radius_cm
             )
         )
-        top_edge2 = FakeEdge(
-            curveType='Circle3DCurveType',
+        top_arc2 = FakeEdge(
+            curveType='Arc3DCurveType',
             length=1.8,
             geometry=SimpleNamespace(
-                curveType='Circle3DCurveType',
+                curveType='Arc3DCurveType',
                 center=make_point(0.5, 0.0, 0.0),
-                normal=make_point(0.0, 0.0, 1.0)
+                normal=make_point(0.0, 0.0, 1.0),
+                radius=grip_radius_cm
             )
         )
-        # Edge on bottom of hole (z=-1) - should be excluded
-        bottom_edge = FakeEdge(
-            curveType='Circle3DCurveType',
-            length=9.6,
+        # Arc on bottom of hole (z=-1) - should be excluded
+        bottom_arc = FakeEdge(
+            curveType='Arc3DCurveType',
+            length=2.0,
             geometry=SimpleNamespace(
-                curveType='Circle3DCurveType',
+                curveType='Arc3DCurveType',
                 center=make_point(0.0, 0.0, -1.0),
-                normal=make_point(0.0, 0.0, 1.0)
+                normal=make_point(0.0, 0.0, 1.0),
+                radius=grip_radius_cm
             )
         )
 
         target_body = MagicMock()
-        target_body.edges = [top_edge1, top_edge2, bottom_edge]
+        target_body.edges = [top_arc1, top_arc2, bottom_arc]
 
         extrude = MagicMock()
         reference_sketch = make_reference_sketch()
         reference_point = make_point(0.0, 0.0, 0.0)
 
-        edges = getGripRidgeChamferEdges(extrude, target_body, reference_sketch, reference_point)
+        edges = getGripRidgeChamferEdges(extrude, target_body, reference_sketch, reference_point, nominal_dia_mm=3.0)
 
-        # Should return only top edges, not bottom edge
+        # Should return only top arcs, not bottom arc
         assert edges is not None
         assert edges.count == 2
-        assert set(edges._items) == {top_edge1, top_edge2}
-        assert bottom_edge not in edges._items
+        assert set(edges._items) == {top_arc1, top_arc2}
+        assert bottom_arc not in edges._items
+
+    def test_getGripRidgeChamferEdges_filters_by_radius(self):
+        """Test that arcs with wrong radius (e.g., clearance hole segments) are excluded."""
+        grip_radius_cm = 0.075  # M3 grip ridge radius
+        clearance_arc_radius_cm = 0.16  # Would be part of clearance hole
+
+        grip_arc = FakeEdge(
+            curveType='Arc3DCurveType',
+            length=2.0,
+            geometry=SimpleNamespace(
+                curveType='Arc3DCurveType',
+                center=make_point(0.5, 0.0, 0.0),
+                normal=make_point(0.0, 0.0, 1.0),
+                radius=grip_radius_cm
+            )
+        )
+        clearance_arc = FakeEdge(
+            curveType='Arc3DCurveType',
+            length=5.0,
+            geometry=SimpleNamespace(
+                curveType='Arc3DCurveType',
+                center=make_point(0.0, 0.0, 0.0),
+                normal=make_point(0.0, 0.0, 1.0),
+                radius=clearance_arc_radius_cm
+            )
+        )
+
+        target_body = MagicMock()
+        target_body.edges = [grip_arc, clearance_arc]
+
+        extrude = MagicMock()
+        reference_sketch = make_reference_sketch()
+        reference_point = make_point(0.0, 0.0, 0.0)
+
+        edges = getGripRidgeChamferEdges(extrude, target_body, reference_sketch, reference_point, nominal_dia_mm=3.0)
+
+        # Should return only the grip ridge arc, not the clearance arc
+        assert edges is not None
+        assert edges.count == 1
+        assert grip_arc in edges._items
+        assert clearance_arc not in edges._items
 
     def test_addAngleChamferToEdge_sets_distance_and_angle(self, monkeypatch):
         edge = FakeEdge(curveType='Circle3DCurveType', length=2.0)

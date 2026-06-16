@@ -186,7 +186,7 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                         # Grip-ridge: chamfer every entrance edge with the configured chamfer size.
                         grip_chamfer_angle = tm_state.CONFIG.get('grip_chamfer_angle', 60)
                         gripEdges = getGripRidgeChamferEdges(
-                            extrude, targetBody, tempSketch, projectedPoint.geometry)
+                            extrude, targetBody, tempSketch, projectedPoint.geometry, nominal_dia_mm=nominalDia)
                         if gripEdges and gripEdges.count > 0:
                             addAngleChamferToEdge(
                                 component, gripEdges,
