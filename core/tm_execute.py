@@ -188,10 +188,9 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                         gripEdges = getGripRidgeChamferEdges(
                             extrude, tempSketch, projectedPoint.geometry)
                         if gripEdges and gripEdges.count > 0:
-                            for i in range(gripEdges.count):
-                                addAngleChamferToEdge(
-                                    component, gripEdges.item(i),
-                                    tm_state.CONFIG['chamfer_size'], grip_chamfer_angle)
+                            addAngleChamferToEdge(
+                                component, gripEdges,
+                                tm_state.CONFIG['chamfer_size'], grip_chamfer_angle)
                     else:
                         # Standard: single 45° equal-distance chamfer
                         chamferEdge = findChamferEdge(extrude, targetBody, parentSketch, center2d, diameter)

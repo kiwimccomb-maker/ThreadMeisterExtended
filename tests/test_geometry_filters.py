@@ -461,6 +461,39 @@ class TestFilterByCurvePoints:
         assert created_values[0] == 0.05
         assert math.isclose(created_values[1], math.radians(60), rel_tol=1e-9)
 
+    def test_addAngleChamferToEdge_accepts_object_collection(self, monkeypatch):
+        """Test that addAngleChamferToEdge accepts an ObjectCollection of edges."""
+        edge1 = FakeEdge(curveType='Circle3DCurveType', length=2.0)
+        edge2 = FakeEdge(curveType='Circle3DCurveType', length=1.8)
+        edge3 = FakeEdge(curveType='Circle3DCurveType', length=1.9)
+
+        component = MagicMock()
+        chamfer_features = MagicMock()
+        component.features.chamferFeatures = chamfer_features
+
+        chamfer_input = MagicMock()
+        chamfer_output = MagicMock()
+        chamfer_features.createInput.return_value = chamfer_input
+        chamfer_features.add.return_value = chamfer_output
+
+        # Create a mock ObjectCollection
+        mock_collection = MagicMock()
+        mock_collection.count = 3
+
+        # Patch ObjectCollection.create to return our mock
+        original_create = adsk.core.ObjectCollection.create
+        adsk.core.ObjectCollection.create = MagicMock(return_value=mock_collection)
+
+        try:
+            result = addAngleChamferToEdge(component, mock_collection, 0.5, 60)
+
+            assert result is chamfer_output
+            # Should use the collection directly, not create a new one
+            assert adsk.core.ObjectCollection.create.call_count == 0
+            assert chamfer_input.setToDistanceAndAngle.called
+        finally:
+            adsk.core.ObjectCollection.create = original_create
+
     def test_profile_endpoint_outside_rejects(self):
         circle_center = make_point(0.0, 0.0, 0.0)
         circle_radius = 1.0

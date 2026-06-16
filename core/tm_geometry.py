@@ -541,11 +541,11 @@ def addChamferToEdge(component, edge, chamferSize):
 
 def addAngleChamferToEdge(component, edge, chamferSize, angleDeg):
     """
-    Add a chamfer with a specified distance and angle to the specified edge.
+    Add a chamfer with a specified distance and angle to the specified edge(s).
 
     Args:
         component: Fusion 360 Component
-        edge: The edge to chamfer
+        edge: A single edge OR an ObjectCollection of edges to chamfer
         chamferSize: Distance along the face in mm
         angleDeg: Chamfer angle in degrees (measured from the face plane)
 
@@ -557,8 +557,13 @@ def addAngleChamferToEdge(component, edge, chamferSize, angleDeg):
             return None
 
         chamfers = component.features.chamferFeatures
-        edges = adsk.core.ObjectCollection.create()
-        edges.add(edge)
+
+        # Accept either a single edge or an ObjectCollection
+        if isinstance(edge, adsk.core.ObjectCollection):
+            edges = edge
+        else:
+            edges = adsk.core.ObjectCollection.create()
+            edges.add(edge)
 
         chamferInput = chamfers.createInput(edges, False)
         chamferDistance = adsk.core.ValueInput.createByReal(chamferSize / 10.0)
@@ -569,7 +574,6 @@ def addAngleChamferToEdge(component, edge, chamferSize, angleDeg):
         chamfer = chamfers.add(chamferInput)
         return chamfer
     except Exception:
-        # Fusion may reject one edge while adjacent entrance edges still chamfer.
         return None
 
 
