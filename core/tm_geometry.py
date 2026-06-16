@@ -402,7 +402,7 @@ def findChamferEdge(extrudeFeature, targetBody, sketch, circleCenter, holeDiamet
         return None
 
 
-def getGripRidgeChamferEdges(extrudeFeature, referenceSketch=None, referencePoint2d=None):
+def getGripRidgeChamferEdges(extrudeFeature, targetBody, referenceSketch=None, referencePoint2d=None):
     """
     Get the top face edges for chamfering on a grip-ridge extrude.
 
@@ -410,104 +410,95 @@ def getGripRidgeChamferEdges(extrudeFeature, referenceSketch=None, referencePoin
     to every edge around the entrance/top face, including the clearance-hole
     boundary and the ridge arcs.
 
+    Strategy (mirrors findChamferEdge but for multiple edges):
+    1. Get the sketch plane's 3D position and normal
+    2. Search targetBody.edges for circular/arc edges coplanar with the sketch plane
+    3. Filter edges that are near the sketch plane (entrance side)
+    4. Return all matching edges as an ObjectCollection
+
     Args:
-        extrudeFeature: The extrude feature that created the grip-ridge hole
-        referenceSketch: Optional sketch on the hole plane used to identify the top face.
-        referencePoint2d: Optional 2D point in sketch coordinates near the hole center.
+        extrudeFeature: The extrude feature that created the grip-ridge hole (unused, kept for API compatibility)
+        targetBody: The body that was cut (edges are searched here)
+        referenceSketch: Sketch on the hole plane used to identify the top face.
+        referencePoint2d: 2D point in sketch coordinates near the hole center.
 
     Returns:
         adsk.core.ObjectCollection of top face edges, or None if not found.
     """
     try:
-        edges = []
-
-        def get_reference_point():
-            if referenceSketch is not None and referencePoint2d is not None:
-                ref_point = adsk.core.Point3D.create(referencePoint2d.x,
-                                                     referencePoint2d.y,
-                                                     0.0)
-                ref_point.transformBy(referenceSketch.transform)
-                return ref_point
+        if referenceSketch is None or referencePoint2d is None:
             return None
 
-        def get_reference_normal():
-            if referenceSketch is None:
-                return None
-            (_origin, _xAxis, _yAxis, zAxis) = referenceSketch.transform.getAsCoordinateSystem()
-            return zAxis
+        # Get 3D center and normal from the reference sketch
+        center3DSketch = adsk.core.Point3D.create(referencePoint2d.x,
+                                                  referencePoint2d.y,
+                                                  0.0)
+        center3D = center3DSketch.copy()
+        center3D.transformBy(referenceSketch.transform)
 
-        def planar_faces():
-            return [face for face in extrudeFeature.faces
-                    if hasattr(face, 'geometry') and
-                    face.geometry.surfaceType == adsk.core.SurfaceTypes.PlaneSurfaceType]
+        (origin, xAxis, yAxis, zAxis) = referenceSketch.transform.getAsCoordinateSystem()
 
-        def distance_to_face_plane(face, point):
-            face_plane = face.geometry
-            face_origin = getattr(face_plane, 'origin', None)
-            if face_origin is None:
-                return None
+        # Collect all circular/arc edges on the target body that are coplanar
+        # with the sketch plane and near the hole center
+        candidateEdges = []
+        tolerance = 0.01  # 1cm tolerance for edge detection
 
-            face_normal = getattr(face_plane, 'normal', None)
-            if face_normal is None:
-                return None
+        for edge in targetBody.edges:
+            if edge.geometry.curveType not in (
+                adsk.core.Curve3DTypes.Circle3DCurveType,
+                adsk.core.Curve3DTypes.Arc3DCurveType
+            ):
+                continue
 
-            vec = adsk.core.Vector3D.create(
-                point.x - face_origin.x,
-                point.y - face_origin.y,
-                point.z - face_origin.z
+            edgeCurve = edge.geometry
+
+            # For circles: check center
+            if edgeCurve.curveType == adsk.core.Curve3DTypes.Circle3DCurveType:
+                edgeCenter = edgeCurve.center
+                edgeNormal = edgeCurve.normal
+            elif edgeCurve.curveType == adsk.core.Curve3DTypes.Arc3DCurveType:
+                edgeCenter = edgeCurve.center
+                edgeNormal = edgeCurve.normal
+            else:
+                continue
+
+            # Check if edge plane is parallel to sketch plane
+            dotProduct = abs(edgeNormal.x * zAxis.x +
+                           edgeNormal.y * zAxis.y +
+                           edgeNormal.z * zAxis.z)
+            if dotProduct < 0.99:
+                continue
+
+            # Check if edge is on the sketch plane (coplanar)
+            vecToEdge = adsk.core.Vector3D.create(
+                edgeCenter.x - center3D.x,
+                edgeCenter.y - center3D.y,
+                edgeCenter.z - center3D.z
             )
-            return abs(vec.x * face_normal.x + vec.y * face_normal.y + vec.z * face_normal.z)
+            projection = vecToEdge.x * zAxis.x + vecToEdge.y * zAxis.y + vecToEdge.z * zAxis.z
+            perpDist = vecToEdge.length - abs(projection)
 
-        def is_coplanar_with_reference(face, point, normal):
-            if point is None or normal is None:
-                return False
+            # Edge must be coplanar (within tolerance) and near the hole center
+            if abs(projection) > tolerance or perpDist > tolerance:
+                continue
 
-            face_normal = getattr(face.geometry, 'normal', None)
-            if face_normal is None:
-                return False
+            candidateEdges.append((edge, abs(projection)))
 
-            dot = abs(face_normal.x * normal.x + face_normal.y * normal.y + face_normal.z * normal.z)
-            if dot < 0.99:
-                return False
+        if not candidateEdges:
+            return None
 
-            distance = distance_to_face_plane(face, point)
-            return distance is not None and distance <= 0.001
+        # Sort by distance to sketch plane and take edges closest to it
+        candidateEdges.sort(key=lambda x: x[1])
 
-        ref_point = get_reference_point()
-        ref_normal = get_reference_normal()
-        candidate_faces = []
+        # Take all edges that are within a tight tolerance of the sketch plane
+        tight_tolerance = 0.001  # 1mm tight tolerance for entrance edges
+        entranceEdges = [e for e, d in candidateEdges if d <= tight_tolerance]
 
-        start_faces = getattr(extrudeFeature, 'startFaces', None)
-        if start_faces is not None and getattr(start_faces, 'count', 0) > 0:
-            start_face_list = [start_faces.item(i) for i in range(start_faces.count)]
-            if ref_point is not None and ref_normal is not None:
-                candidate_faces = [
-                    face for face in start_face_list
-                    if is_coplanar_with_reference(face, ref_point, ref_normal)
-                ]
-            if not candidate_faces:
-                candidate_faces = start_face_list
-
-        if not candidate_faces and ref_point is not None and ref_normal is not None:
-            candidate_faces = [
-                face for face in planar_faces()
-                if is_coplanar_with_reference(face, ref_point, ref_normal)
-            ]
-
-        seen_edge_ids = set()
-        for face in candidate_faces:
-            for edge in face.edges:
-                edge_id = id(edge)
-                if edge_id in seen_edge_ids:
-                    continue
-                seen_edge_ids.add(edge_id)
-                edges.append(edge)
-
-        if not edges:
+        if not entranceEdges:
             return None
 
         result = adsk.core.ObjectCollection.create()
-        for edge in edges:
+        for edge in entranceEdges:
             result.add(edge)
 
         return result if result.count > 0 else None
