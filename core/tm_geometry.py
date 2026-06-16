@@ -407,8 +407,8 @@ def getGripRidgeChamferEdges(extrudeFeature, targetBody, referenceSketch, refere
     Find the 3 grip ridge arc edges at the hole entrance for chamfering.
 
     Steps:
-    1. Find all Arc3D edges on the target body coplanar with the sketch plane
-    2. Narrow to edges whose center is at distance ~0 from the sketch plane
+    1. Find all Arc3D/Circle3D edges on the target body coplanar with the sketch plane
+    2. Narrow to edges at distance ~0 from the sketch plane
     3. Filter by radius: only keep arcs matching the grip ridge circle radius
        from the GRIP_RIDGE_INSERTS spec (arc radius = 0.5 * nominal_dia / 2)
     4. Return the matching edges (should be 3)
@@ -437,15 +437,27 @@ def getGripRidgeChamferEdges(extrudeFeature, targetBody, referenceSketch, refere
         # so radius = arc_circle_dia / 2 = 0.25 * nominal_dia_mm, then /10 for cm.
         expected_grip_radius_cm = (0.5 * nominal_dia_mm) / 2.0 / 10.0
 
-        radius_tol = 0.001    # 0.01 mm in cm
-        plane_tol = 0.001     # 0.01 mm in cm
+        radius_tol = 0.005    # 0.05 mm in cm
+        plane_tol = 0.005     # 0.05 mm in cm
 
-        # 2. Collect all Arc3D edges coplanar with the sketch plane
-        #    at distance ~0 from it
+        # 2. Scan all edges on the target body
+        total_edges = targetBody.edges.count
+        tm_helpers.log('GripRidgeChamfer: total body edges = {}'.format(total_edges))
+
         matching_edges = []
+        arc_count = 0
+        circle_count = 0
+        parallel_count = 0
+        coplanar_count = 0
+        radius_match_count = 0
 
         for edge in targetBody.edges:
-            if edge.geometry.curveType != adsk.core.Curve3DTypes.Arc3DCurveType:
+            # Accept both Arc3D and Circle3D (trimmed circles may be either type)
+            if edge.geometry.curveType == adsk.core.Curve3DTypes.Arc3DCurveType:
+                arc_count += 1
+            elif edge.geometry.curveType == adsk.core.Curve3DTypes.Circle3DCurveType:
+                circle_count += 1
+            else:
                 continue
 
             curve = edge.geometry
@@ -459,6 +471,7 @@ def getGripRidgeChamferEdges(extrudeFeature, targetBody, referenceSketch, refere
                       edge_normal.z * zAxis.z)
             if dot < 0.99:
                 continue
+            parallel_count += 1
 
             # Must be coplanar with the sketch plane (distance ~0)
             vec = adsk.core.Vector3D.create(
@@ -474,18 +487,37 @@ def getGripRidgeChamferEdges(extrudeFeature, targetBody, referenceSketch, refere
 
             if abs(projection) > plane_tol or perp_dist > plane_tol:
                 continue
+            coplanar_count += 1
 
             # 3. Match radius against expected grip ridge radius
+            tm_helpers.log('  Coplanar edge: radius={:.6f} cm (expected={:.6f}, diff={:.6f})'.format(
+                edge_radius, expected_grip_radius_cm, abs(edge_radius - expected_grip_radius_cm)))
+
             if abs(edge_radius - expected_grip_radius_cm) > radius_tol:
                 continue
+            radius_match_count += 1
 
             matching_edges.append(edge)
 
+        # Diagnostic summary
+        tm_helpers.log('GripRidgeChamfer diagnostics:')
+        tm_helpers.log('  Arc edges={}, Circle edges={}'.format(arc_count, circle_count))
+        tm_helpers.log('  Parallel to plane={}'.format(parallel_count))
+        tm_helpers.log('  Coplanar (dist~0)={}'.format(coplanar_count))
+        tm_helpers.log('  Radius match={}'.format(radius_match_count))
+        tm_helpers.log('  Total matching={}'.format(len(matching_edges)))
+        tm_helpers.log('  Expected radius={} cm (nominal_dia={} mm)'.format(
+            expected_grip_radius_cm, nominal_dia_mm))
+
         if len(matching_edges) < 3:
-            tm_helpers.log(
-                'getGripRidgeChamferEdges: found {} edges, expected 3. '
-                'Expected radius={} cm, plane_tol={} cm'.format(
-                    len(matching_edges), expected_grip_radius_cm, plane_tol))
+            if tm_state._ui:
+                tm_state._ui.messageBox(
+                    'Grip ridge chamfer: found {} matching edges (need 3).\n'
+                    'Expected radius: {:.4f} cm\n'
+                    'Arc edges: {}, Circle edges: {}, Parallel: {}, Coplanar: {}, Radius match: {}\n'
+                    'Check tm_helpers log for details.'.format(
+                        len(matching_edges), expected_grip_radius_cm,
+                        arc_count, circle_count, parallel_count, coplanar_count, radius_match_count))
             return None
 
         # 4. Return exactly the first 3 matching edges
@@ -493,6 +525,7 @@ def getGripRidgeChamferEdges(extrudeFeature, targetBody, referenceSketch, refere
         for edge in matching_edges[:3]:
             result.add(edge)
 
+        tm_helpers.log('GripRidgeChamfer: returning {} edges'.format(result.count))
         return result
 
     except Exception:
