@@ -402,114 +402,99 @@ def findChamferEdge(extrudeFeature, targetBody, sketch, circleCenter, holeDiamet
         return None
 
 
-def getGripRidgeChamferEdges(extrudeFeature, targetBody, referenceSketch=None, referencePoint2d=None, nominal_dia_mm=None):
+def getGripRidgeChamferEdges(extrudeFeature, targetBody, referenceSketch, referencePoint2d, nominal_dia_mm):
     """
-    Get the grip ridge arc edges for chamfering on a grip-ridge extrude.
+    Find the 3 grip ridge arc edges at the hole entrance for chamfering.
 
-    The grip-ridge sketch uses a non-circular profile. Chamfering should apply
-    only to the 3 grip ridge arcs that protrude into the hole — NOT the
-    clearance hole edge.
-
-    Strategy:
-    1. Get the sketch plane's 3D position and normal
-    2. Search targetBody.edges for arc edges coplanar with the sketch plane
-    3. Filter arcs by radius: keep only those matching the grip ridge radius
-       (0.25 * nominal_dia), exclude the clearance hole radius
-    4. Return matching grip ridge edges as an ObjectCollection
+    Steps:
+    1. Find all Arc3D edges on the target body coplanar with the sketch plane
+    2. Narrow to edges whose center is at distance ~0 from the sketch plane
+    3. Filter by radius: only keep arcs matching the grip ridge circle radius
+       from the GRIP_RIDGE_INSERTS spec (arc radius = 0.5 * nominal_dia / 2)
+    4. Return the matching edges (should be 3)
 
     Args:
         extrudeFeature: The extrude feature (unused, kept for API compatibility)
-        targetBody: The body that was cut (edges are searched here)
-        referenceSketch: Sketch on the hole plane used to identify the top face.
-        referencePoint2d: 2D point in sketch coordinates near the hole center.
-        nominal_dia_mm: Nominal thread diameter in mm (used to compute expected grip ridge radius).
+        targetBody: The body that was cut.
+        referenceSketch: The temp sketch on the hole face.
+        referencePoint2d: The projected sketch point geometry (2D, in sketch coords).
+        nominal_dia_mm: The nominal thread diameter in mm from GRIP_RIDGE_INSERTS.
 
     Returns:
-        adsk.core.ObjectCollection of grip ridge edges, or None if not found.
+        ObjectCollection of 3 grip ridge edges, or None.
     """
     try:
-        if referenceSketch is None or referencePoint2d is None:
-            return None
-
-        # Get 3D center and normal from the reference sketch
-        center3DSketch = adsk.core.Point3D.create(referencePoint2d.x,
-                                                  referencePoint2d.y,
-                                                  0.0)
+        # 1. Get 3D center and sketch plane normal
+        center3DSketch = adsk.core.Point3D.create(
+            referencePoint2d.x, referencePoint2d.y, 0.0)
         center3D = center3DSketch.copy()
         center3D.transformBy(referenceSketch.transform)
 
-        (origin, xAxis, yAxis, zAxis) = referenceSketch.transform.getAsCoordinateSystem()
+        (_origin, _xAxis, _yAxis, zAxis) = referenceSketch.transform.getAsCoordinateSystem()
 
-        # Collect all arc edges on the target body that are coplanar with the
-        # sketch plane and match the grip ridge radius (not the clearance hole).
-        # Grip ridge arc radius = 0.5 * nominal_dia / 2 = 0.25 * nominal_dia (in mm).
-        candidateEdges = []
-        tolerance = 0.01  # 1cm tolerance for edge detection
+        # Expected grip ridge arc radius in cm (Fusion internal units).
+        # Matches create_grip_ridge_sketch: arc_circle_dia = 0.5 * nominal_dia_mm
+        # so radius = arc_circle_dia / 2 = 0.25 * nominal_dia_mm, then /10 for cm.
+        expected_grip_radius_cm = (0.5 * nominal_dia_mm) / 2.0 / 10.0
 
-        # Compute expected grip ridge radius in cm (Fusion internal units)
-        expected_grip_radius_cm = None
-        if nominal_dia_mm is not None:
-            expected_grip_radius_cm = (0.5 * nominal_dia_mm) / 2.0 / 10.0
+        radius_tol = 0.001    # 0.01 mm in cm
+        plane_tol = 0.001     # 0.01 mm in cm
+
+        # 2. Collect all Arc3D edges coplanar with the sketch plane
+        #    at distance ~0 from it
+        matching_edges = []
 
         for edge in targetBody.edges:
-            # Only select arc edges (the trimmed grip ridges), not full circles
-            # (the clearance hole). After trimming in create_grip_ridge_sketch,
-            # grip ridges become Arc3D edges while the clearance hole stays Circle3D.
             if edge.geometry.curveType != adsk.core.Curve3DTypes.Arc3DCurveType:
                 continue
 
-            edgeCurve = edge.geometry
-            edgeCenter = edgeCurve.center
-            edgeNormal = edgeCurve.normal
-            edgeRadius = edgeCurve.radius
+            curve = edge.geometry
+            edge_center = curve.center
+            edge_normal = curve.normal
+            edge_radius = curve.radius
 
-            # If we know the expected grip ridge radius, filter by radius match.
-            # This excludes the clearance hole arcs (different radius).
-            if expected_grip_radius_cm is not None:
-                radius_diff = abs(edgeRadius - expected_grip_radius_cm)
-                if radius_diff > 0.001:  # 0.01mm tolerance
-                    continue
-
-            # Check if edge plane is parallel to sketch plane
-            dotProduct = abs(edgeNormal.x * zAxis.x +
-                           edgeNormal.y * zAxis.y +
-                           edgeNormal.z * zAxis.z)
-            if dotProduct < 0.99:
+            # Must be parallel to sketch plane
+            dot = abs(edge_normal.x * zAxis.x +
+                      edge_normal.y * zAxis.y +
+                      edge_normal.z * zAxis.z)
+            if dot < 0.99:
                 continue
 
-            # Check if edge is on the sketch plane (coplanar)
-            vecToEdge = adsk.core.Vector3D.create(
-                edgeCenter.x - center3D.x,
-                edgeCenter.y - center3D.y,
-                edgeCenter.z - center3D.z
-            )
-            projection = vecToEdge.x * zAxis.x + vecToEdge.y * zAxis.y + vecToEdge.z * zAxis.z
-            perpDist = vecToEdge.length - abs(projection)
+            # Must be coplanar with the sketch plane (distance ~0)
+            vec = adsk.core.Vector3D.create(
+                edge_center.x - center3D.x,
+                edge_center.y - center3D.y,
+                edge_center.z - center3D.z)
+            projection = vec.x * zAxis.x + vec.y * zAxis.y + vec.z * zAxis.z
+            perp_dist_sq = vec.length ** 2 - projection ** 2
+            if perp_dist_sq < 0:
+                perp_dist = 0.0
+            else:
+                perp_dist = math.sqrt(perp_dist_sq)
 
-            # Edge must be coplanar (within tolerance) and near the hole center
-            if abs(projection) > tolerance or perpDist > tolerance:
+            if abs(projection) > plane_tol or perp_dist > plane_tol:
                 continue
 
-            candidateEdges.append((edge, abs(projection)))
+            # 3. Match radius against expected grip ridge radius
+            if abs(edge_radius - expected_grip_radius_cm) > radius_tol:
+                continue
 
-        if not candidateEdges:
+            matching_edges.append(edge)
+
+        if len(matching_edges) < 3:
+            tm_helpers.log(
+                'getGripRidgeChamferEdges: found {} edges, expected 3. '
+                'Expected radius={} cm, plane_tol={} cm'.format(
+                    len(matching_edges), expected_grip_radius_cm, plane_tol))
             return None
 
-        # Sort by distance to sketch plane and take edges closest to it
-        candidateEdges.sort(key=lambda x: x[1])
-
-        # Take all edges that are within a tight tolerance of the sketch plane
-        tight_tolerance = 0.001  # 1mm tight tolerance for entrance edges
-        entranceEdges = [e for e, d in candidateEdges if d <= tight_tolerance]
-
-        if not entranceEdges:
-            return None
-
+        # 4. Return exactly the first 3 matching edges
         result = adsk.core.ObjectCollection.create()
-        for edge in entranceEdges:
+        for edge in matching_edges[:3]:
             result.add(edge)
 
-        return result if result.count > 0 else None
+        return result
+
     except Exception:
         msg = 'Error in getGripRidgeChamferEdges:\n{}'.format(traceback.format_exc())
         tm_helpers.log(msg)
