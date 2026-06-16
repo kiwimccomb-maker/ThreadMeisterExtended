@@ -64,7 +64,12 @@ def make_point(x, y, z=0.0):
         )
 
     point.distanceTo = distance_to
+    point.transformBy = lambda _transform: None
     return point
+
+
+adsk.core.Point3D.create = lambda x, y, z=0.0: make_point(x, y, z)
+adsk.core.Vector3D.create = lambda x, y, z=0.0: make_point(x, y, z)
 
 
 def make_profile(area, centroid_x=0.0, centroid_y=0.0, centroid_z=0.0,
@@ -280,9 +285,11 @@ class SimpleObjectCollection:
 
 
 class FakeGeometry:
-    def __init__(self, surfaceType=None, curveType=None):
+    def __init__(self, surfaceType=None, curveType=None, origin=None, normal=None):
         self.surfaceType = surfaceType
         self.curveType = curveType
+        self.origin = origin
+        self.normal = normal
 
 
 class FakeEdge:
@@ -292,8 +299,8 @@ class FakeEdge:
 
 
 class FakeFace:
-    def __init__(self, surfaceType, edges):
-        self.geometry = FakeGeometry(surfaceType=surfaceType)
+    def __init__(self, surfaceType, edges, origin=None, normal=None):
+        self.geometry = FakeGeometry(surfaceType=surfaceType, origin=origin, normal=normal)
         self.edges = edges
 
 
@@ -307,6 +314,20 @@ class FakeStartFaces:
 
     def item(self, index):
         return self._faces[index]
+
+
+class FakeSketchTransform:
+    def getAsCoordinateSystem(self):
+        return (
+            make_point(0.0, 0.0, 0.0),
+            make_point(1.0, 0.0, 0.0),
+            make_point(0.0, 1.0, 0.0),
+            make_point(0.0, 0.0, 1.0),
+        )
+
+
+def make_reference_sketch():
+    return SimpleNamespace(transform=FakeSketchTransform())
 
 
 class TestFilterByCurvePoints:
@@ -360,18 +381,58 @@ class TestFilterByCurvePoints:
         arc_edge2 = FakeEdge(curveType='Circle3DCurveType', length=2.0)
         arc_edge3 = FakeEdge(curveType='Circle3DCurveType', length=1.9)
         face1 = FakeFace(surfaceType='PlaneSurfaceType', 
-                        edges=[clearance_hole, arc_edge1, arc_edge2, arc_edge3])
+                        edges=[clearance_hole, arc_edge1, arc_edge2, arc_edge3],
+                        origin=make_point(0.0, 0.0, 0.0),
+                        normal=make_point(0.0, 0.0, 1.0))
 
         extrude = MagicMock()
         extrude.startFaces = None
         extrude.faces = [face1]
 
-        edges = getGripRidgeChamferEdges(extrude)
+        reference_sketch = make_reference_sketch()
+        reference_point = make_point(0.0, 0.0, 0.0)
+        edges = getGripRidgeChamferEdges(extrude, reference_sketch, reference_point)
 
         # Should return all top edges without filtering by edge length
         assert edges is not None
         assert edges.count == 4
         assert set(edges._items) == {clearance_hole, arc_edge1, arc_edge2, arc_edge3}
+
+    def test_getGripRidgeChamferEdges_uses_sketch_side_not_extent(self):
+        """Regression test: chamfer edges must come from the sketch side, not the extrude extent."""
+        top_edges = [
+            FakeEdge(curveType='Circle3DCurveType', length=9.6),
+            FakeEdge(curveType='Circle3DCurveType', length=1.8),
+            FakeEdge(curveType='Circle3DCurveType', length=2.0),
+        ]
+        bottom_edges = [
+            FakeEdge(curveType='Circle3DCurveType', length=9.6),
+            FakeEdge(curveType='Circle3DCurveType', length=1.8),
+            FakeEdge(curveType='Circle3DCurveType', length=2.0),
+        ]
+        top_face = FakeFace(
+            surfaceType='PlaneSurfaceType',
+            edges=top_edges,
+            origin=make_point(0.0, 0.0, 0.0),
+            normal=make_point(0.0, 0.0, 1.0))
+        bottom_face = FakeFace(
+            surfaceType='PlaneSurfaceType',
+            edges=bottom_edges,
+            origin=make_point(0.0, 0.0, -1.0),
+            normal=make_point(0.0, 0.0, 1.0))
+
+        extrude = MagicMock()
+        extrude.startFaces = None
+        extrude.faces = [bottom_face, top_face]
+
+        reference_sketch = make_reference_sketch()
+        reference_point = make_point(0.0, 0.0, 0.0)
+        edges = getGripRidgeChamferEdges(extrude, reference_sketch, reference_point)
+
+        assert edges is not None
+        assert edges.count == len(top_edges)
+        assert set(edges._items) == set(top_edges)
+        assert not any(edge in edges._items for edge in bottom_edges)
 
     def test_addAngleChamferToEdge_sets_distance_and_angle(self, monkeypatch):
         edge = FakeEdge(curveType='Circle3DCurveType', length=2.0)

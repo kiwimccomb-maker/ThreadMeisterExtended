@@ -188,7 +188,7 @@ def updateInfoText(inputs):
         is_grip_ridge = insertName in tm_state.GRIP_RIDGE_INSERTS
 
         if is_grip_ridge:
-            clearanceDia, configInsertLen, minWall, nominalDia, gripEdgeChamfer = tm_state.GRIP_RIDGE_INSERTS[insertName]
+            clearanceDia, configInsertLen, minWall, nominalDia, _ = tm_state.GRIP_RIDGE_INSERTS[insertName]
             holeDia = clearanceDia
             arc_dia = 0.5 * nominalDia
 
@@ -225,7 +225,7 @@ def updateInfoText(inputs):
             chamfer_info = f'{tm_state.CONFIG["chamfer_size"]}mm @ {grip_chamfer_angle}°' if chamferOn else 'Off'
             info = (f'<b>{insertName}</b><br/>' +
                     f'Hole: {holeDia:.1f} mm  ·  Depth: {totalDepth:.1f} mm<br/>' +
-                    f'Ridges: 3× Ø{arc_dia:.1f} mm  ·  Grip chamfer: {gripEdgeChamfer} mm<br/>' +
+                    f'Ridges: 3× Ø{arc_dia:.1f} mm<br/>' +
                     f'Chamfer: {chamfer_info}<br/>' +
                     f'Hole depth: {depthStr}<br/>' +
                     f'Min wall: {minWall} mm')

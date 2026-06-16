@@ -416,7 +416,7 @@ def getGripRidgeChamferEdges(extrudeFeature, referenceSketch=None, referencePoin
         referencePoint2d: Optional 2D point in sketch coordinates near the hole center.
 
     Returns:
-        adsk.core.ObjectCollection of arc ridge edges, or None if not found.
+        adsk.core.ObjectCollection of top face edges, or None if not found.
     """
     try:
         edges = []
@@ -429,6 +429,12 @@ def getGripRidgeChamferEdges(extrudeFeature, referenceSketch=None, referencePoin
                 ref_point.transformBy(referenceSketch.transform)
                 return ref_point
             return None
+
+        def get_reference_normal():
+            if referenceSketch is None:
+                return None
+            (_origin, _xAxis, _yAxis, zAxis) = referenceSketch.transform.getAsCoordinateSystem()
+            return zAxis
 
         def planar_faces():
             return [face for face in extrudeFeature.faces
@@ -443,7 +449,7 @@ def getGripRidgeChamferEdges(extrudeFeature, referenceSketch=None, referencePoin
 
             face_normal = getattr(face_plane, 'normal', None)
             if face_normal is None:
-                return face_origin.distanceTo(point)
+                return None
 
             vec = adsk.core.Vector3D.create(
                 point.x - face_origin.x,
@@ -452,28 +458,41 @@ def getGripRidgeChamferEdges(extrudeFeature, referenceSketch=None, referencePoin
             )
             return abs(vec.x * face_normal.x + vec.y * face_normal.y + vec.z * face_normal.z)
 
+        def is_coplanar_with_reference(face, point, normal):
+            if point is None or normal is None:
+                return False
+
+            face_normal = getattr(face.geometry, 'normal', None)
+            if face_normal is None:
+                return False
+
+            dot = abs(face_normal.x * normal.x + face_normal.y * normal.y + face_normal.z * normal.z)
+            if dot < 0.99:
+                return False
+
+            distance = distance_to_face_plane(face, point)
+            return distance is not None and distance <= 0.001
+
         ref_point = get_reference_point()
+        ref_normal = get_reference_normal()
         candidate_faces = []
 
-        if ref_point is not None:
-            face_distances = []
-            for face in planar_faces():
-                distance = distance_to_face_plane(face, ref_point)
-                if distance is None:
-                    continue
-                face_distances.append((face, distance))
-            if face_distances:
-                min_dist = min(dist for _face, dist in face_distances)
-                tolerance = 0.001
-                candidate_faces = [face for face, dist in face_distances if dist <= min_dist + tolerance]
+        start_faces = getattr(extrudeFeature, 'startFaces', None)
+        if start_faces is not None and getattr(start_faces, 'count', 0) > 0:
+            start_face_list = [start_faces.item(i) for i in range(start_faces.count)]
+            if ref_point is not None and ref_normal is not None:
+                candidate_faces = [
+                    face for face in start_face_list
+                    if is_coplanar_with_reference(face, ref_point, ref_normal)
+                ]
+            if not candidate_faces:
+                candidate_faces = start_face_list
 
-        if not candidate_faces:
-            start_faces = getattr(extrudeFeature, 'startFaces', None)
-            if start_faces is not None and getattr(start_faces, 'count', 0) > 0:
-                candidate_faces = [start_faces.item(i) for i in range(start_faces.count)]
-
-        if not candidate_faces:
-            candidate_faces = planar_faces()
+        if not candidate_faces and ref_point is not None and ref_normal is not None:
+            candidate_faces = [
+                face for face in planar_faces()
+                if is_coplanar_with_reference(face, ref_point, ref_normal)
+            ]
 
         seen_edge_ids = set()
         for face in candidate_faces:
@@ -482,9 +501,6 @@ def getGripRidgeChamferEdges(extrudeFeature, referenceSketch=None, referencePoin
                 if edge_id in seen_edge_ids:
                     continue
                 seen_edge_ids.add(edge_id)
-                edge_length = getattr(edge, 'length', None)
-                if edge_length is None or edge_length < 0.01:
-                    continue
                 edges.append(edge)
 
         if not edges:
@@ -494,9 +510,7 @@ def getGripRidgeChamferEdges(extrudeFeature, referenceSketch=None, referencePoin
         for edge in edges:
             result.add(edge)
 
-        if result.count > 0:
-            return result
-        return None
+        return result if result.count > 0 else None
     except Exception:
         msg = 'Error in getGripRidgeChamferEdges:\n{}'.format(traceback.format_exc())
         tm_helpers.log(msg)
@@ -555,8 +569,7 @@ def addAngleChamferToEdge(component, edge, chamferSize, angleDeg):
         chamfer = chamfers.add(chamferInput)
         return chamfer
     except Exception:
-        # Edge may be a partial arc segment at the clearance circle junction.
-        # Skip silently -- the remaining edges are still attempted.
+        # Fusion may reject one edge while adjacent entrance edges still chamfer.
         return None
 
 
