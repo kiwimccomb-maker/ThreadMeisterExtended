@@ -163,41 +163,49 @@ def load_config(config_file=None):
                     if not values.strip() or values.strip().startswith('#'):
                         continue
                     parts = [x.strip() for x in values.split(',')]
-                    if len(parts) < 4 or len(parts) > 5:
+                    if len(parts) != 6:
                         warnings.append(
-                            f'Grip-ridge insert "{name}" has {len(parts)} values (expected 4 or 5). Skipped.')
+                            f'Grip-ridge insert "{name}" has {len(parts)} values (expected 6). Skipped.')
                         continue
                     try:
                         clearance_dia = float(parts[0])
-                        depth = float(parts[1])
-                        min_wall = float(parts[2])
-                        nominal_dia = float(parts[3])
-                        grip_edge_chamfer = float(parts[4]) if len(parts) == 5 else 0.5
+                        hole_depth = float(parts[1])
+                        grip_edge_chamfer = float(parts[2])
+                        grip_ridge_dia = float(parts[3])
+                        grip_arc_distance = float(parts[4])
+                        grip_count = int(parts[5])
                         if clearance_dia <= 0 or clearance_dia > 50:
                             warnings.append(
                                 f'Grip-ridge insert "{name}": clearance diameter '
                                 f'{clearance_dia}mm is invalid. Skipped.')
                             continue
-                        if depth <= 0 or depth > 100:
+                        if hole_depth <= 0 or hole_depth > 100:
                             warnings.append(
-                                f'Grip-ridge insert "{name}": depth {depth}mm is invalid. Skipped.')
-                            continue
-                        if min_wall < 0 or min_wall > 20:
-                            warnings.append(
-                                f'Grip-ridge insert "{name}": min wall {min_wall}mm is invalid. Skipped.')
-                            continue
-                        if nominal_dia <= 0 or nominal_dia > 50:
-                            warnings.append(
-                                f'Grip-ridge insert "{name}": nominal diameter '
-                                f'{nominal_dia}mm is invalid. Skipped.')
+                                f'Grip-ridge insert "{name}": hole depth {hole_depth}mm is invalid. Skipped.')
                             continue
                         if grip_edge_chamfer < 0 or grip_edge_chamfer > 5.0:
                             warnings.append(
                                 f'Grip-ridge insert "{name}": grip edge chamfer '
-                                f'{grip_edge_chamfer}mm is invalid. Using default 0.5mm.')
-                            grip_edge_chamfer = 0.5
+                                f'{grip_edge_chamfer}mm is invalid. Using default 0.2mm.')
+                            grip_edge_chamfer = 0.2
+                        if grip_ridge_dia <= 0 or grip_ridge_dia > 20:
+                            warnings.append(
+                                f'Grip-ridge insert "{name}": grip ridge diameter '
+                                f'{grip_ridge_dia}mm is invalid. Skipped.')
+                            continue
+                        if grip_arc_distance <= 0 or grip_arc_distance > 50:
+                            warnings.append(
+                                f'Grip-ridge insert "{name}": grip arc distance '
+                                f'{grip_arc_distance}mm is invalid. Skipped.')
+                            continue
+                        if grip_count < 1 or grip_count > 12:
+                            warnings.append(
+                                f'Grip-ridge insert "{name}": grip count '
+                                f'{grip_count} invalid. Using default 3.')
+                            grip_count = 3
                         tm_state.GRIP_RIDGE_INSERTS[name] = (
-                            clearance_dia, depth, min_wall, nominal_dia, grip_edge_chamfer)
+                            clearance_dia, hole_depth, grip_edge_chamfer,
+                            grip_ridge_dia, grip_arc_distance, grip_count)
                     except ValueError:
                         warnings.append(
                             f'Grip-ridge insert "{name}": Invalid number format. Skipped.')
@@ -262,9 +270,11 @@ def _write_config_file(config_file=None):
 
     # [GripRidgeInserts]
     config.add_section('GripRidgeInserts')
-    for name, (clearance_dia, depth, wall, nominal_dia, grip_edge_chamfer) in tm_state.GRIP_RIDGE_INSERTS.items():
+    for name, (clearance_dia, hole_depth, grip_edge_chamfer,
+               grip_ridge_dia, grip_arc_distance, grip_count) in tm_state.GRIP_RIDGE_INSERTS.items():
         config.set('GripRidgeInserts', name,
-                   f'{clearance_dia}, {depth}, {wall}, {nominal_dia}, {grip_edge_chamfer}')
+                   f'{clearance_dia}, {hole_depth}, {grip_edge_chamfer}, '
+                   f'{grip_ridge_dia}, {grip_arc_distance}, {grip_count}')
 
     # [UI State]
     config.add_section('UI State')
@@ -338,17 +348,21 @@ def get_default_inserts():
 
 
 def get_default_grip_ridge_inserts():
-    """Return the default grip-ridge insert specifications."""
+    """Return the default grip-ridge insert specifications.
+
+    Tuple: (clearance_dia, hole_depth, grip_edge_chamfer,
+            grip_ridge_dia, grip_arc_distance, grip_count)
+    """
     return {
-        'M1.6 Grip':  (1.7, 4.0, 1.0, 1.6, 0.3),
-        'M2 Grip':    (2.2, 5.0, 1.2, 2.0, 0.3),
-        'M2.5 Grip':  (2.7, 6.0, 1.5, 2.5, 0.4),
-        'M3 Grip':    (3.2, 7.0, 1.6, 3.0, 0.5),
-        'M4 Grip':    (4.3, 8.0, 2.0, 4.0, 0.5),
-        'M5 Grip':    (5.3, 9.0, 2.5, 5.0, 0.6),
-        'M6 Grip':    (6.4, 12.0, 3.0, 6.0, 0.6),
-        'M8 Grip':    (8.4, 14.0, 4.0, 8.0, 0.8),
-        'M10 Grip':   (10.5, 16.0, 5.0, 10.0, 1.0),
+        'M1.6 Grip':  (1.8, 4,  0.12, 0.8,  1.075, 3),
+        'M2 Grip':    (2.2, 5,  0.14, 1.0,  1.35,  3),
+        'M2.5 Grip':  (2.7, 6,  0.14, 1.25, 1.725, 3),
+        'M3 Grip':    (3.2, 7,  0.19, 1.5,  2.05,  3),
+        'M4 Grip':    (4.2, 8,  0.22, 2.0,  2.75,  3),
+        'M5 Grip':    (5.3, 9,  0.23, 2.5,  3.5,   4),
+        'M6 Grip':    (6.3, 10, 0.24, 2.7,  3.5,   5),
+        'M8 Grip':    (8.3, 12, 0.35, 3.5,  5.3,   5),
+        'M10 Grip':   (10.3, 14, 0.4, 4.0,  6.45,  6),
     }
 
 
@@ -369,8 +383,10 @@ def create_default_config(config_file=None):
                 f.write(f'{name} = {dia}, {length}, {wall}\n')
             f.write('\n')
             f.write('[GripRidgeInserts]\n')
-            for name, (clearance_dia, depth, wall, nominal_dia, grip_edge_chamfer) in get_default_grip_ridge_inserts().items():
-                f.write(f'{name} = {clearance_dia}, {depth}, {wall}, {nominal_dia}, {grip_edge_chamfer}\n')
+            for name, (clearance_dia, hole_depth, grip_edge_chamfer,
+                       grip_ridge_dia, grip_arc_distance, grip_count) in get_default_grip_ridge_inserts().items():
+                f.write(f'{name} = {clearance_dia}, {hole_depth}, {grip_edge_chamfer}, '
+                        f'{grip_ridge_dia}, {grip_arc_distance}, {grip_count}\n')
             f.write('\n')
             f.write('[UI State]\n')
             f.write('chamfer_enabled_default = True\n')

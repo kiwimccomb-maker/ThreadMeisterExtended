@@ -82,23 +82,27 @@ class TestGetDefaultGripRidgeInserts:
         """Should include M3 Grip with correct values."""
         inserts = get_default_grip_ridge_inserts()
         assert 'M3 Grip' in inserts
-        clearance, depth, wall, nominal, grip_edge_chamfer = inserts['M3 Grip']
+        (clearance, hole_depth, grip_chamfer,
+         grip_ridge_dia, grip_arc_dist, grip_count) = inserts['M3 Grip']
         assert clearance == 3.2
-        assert depth == 7.0
-        assert wall == 1.6
-        assert nominal == 3.0
-        assert grip_edge_chamfer == 0.5
+        assert hole_depth == 7
+        assert grip_chamfer == 0.19
+        assert grip_ridge_dia == 1.5
+        assert grip_arc_dist == 2.05
+        assert grip_count == 3
 
     def test_m6_grip_present(self):
         """Should include M6 Grip with correct values."""
         inserts = get_default_grip_ridge_inserts()
         assert 'M6 Grip' in inserts
-        clearance, depth, wall, nominal, grip_edge_chamfer = inserts['M6 Grip']
-        assert clearance == 6.4
-        assert depth == 12.0
-        assert wall == 3.0
-        assert nominal == 6.0
-        assert grip_edge_chamfer == 0.6
+        (clearance, hole_depth, grip_chamfer,
+         grip_ridge_dia, grip_arc_dist, grip_count) = inserts['M6 Grip']
+        assert clearance == 6.3
+        assert hole_depth == 10
+        assert grip_chamfer == 0.24
+        assert grip_ridge_dia == 2.7
+        assert grip_arc_dist == 3.5
+        assert grip_count == 5
 
     def test_all_sizes_present(self):
         """Should include all sizes from M1.6 to M10."""
@@ -111,44 +115,38 @@ class TestGetDefaultGripRidgeInserts:
             assert name in inserts, f"{name} missing from defaults"
 
     def test_arc_geometry_params(self):
-        """Arc ridge circles should have valid geometry parameters."""
+        """Grip ridge geometry should be valid (ridges extend beyond clearance hole)."""
         inserts = get_default_grip_ridge_inserts()
-        for name, (clearance, depth, wall, nominal, grip_edge_chamfer) in inserts.items():
-            # Arc circle diameter = 0.5 * nominal
-            arc_dia = 0.5 * nominal
-            # Arc center distance = 0.6 * nominal
-            arc_center_dist = 0.6 * nominal
-
-            # Arc circles should be smaller than the clearance hole
-            assert arc_dia < clearance, \
-                f"{name}: arc dia {arc_dia} >= clearance {clearance}"
-
-            # Arc center distance should position arcs partially outside
-            # the clearance hole for grip functionality
+        for name, (clearance, hole_depth, grip_chamfer,
+                   grip_ridge_dia, grip_arc_dist, grip_count) in inserts.items():
+            # Grip ridge circles should extend beyond the clearance hole for grip functionality
             clearance_radius = clearance / 2.0
-            arc_radius = arc_dia / 2.0
-            outer_reach = arc_center_dist + arc_radius
+            ridge_radius = grip_ridge_dia / 2.0
+            outer_reach = grip_arc_dist + ridge_radius
             assert outer_reach > clearance_radius, \
-                f"{name}: arcs don't extend beyond clearance hole"
-
-            assert grip_edge_chamfer >= 0.0, f"{name}: grip edge chamfer not non-negative"
+                f"{name}: grip ridges don't extend beyond clearance hole"
+            assert grip_count >= 1 and grip_count <= 12, f"{name}: invalid grip_count {grip_count}"
+            assert grip_chamfer >= 0.0, f"{name}: grip chamfer not non-negative"
 
     def test_all_values_positive(self):
         """All values should be positive."""
         inserts = get_default_grip_ridge_inserts()
-        for name, (clearance, depth, wall, nominal, grip_edge_chamfer) in inserts.items():
+        for name, (clearance, hole_depth, grip_chamfer,
+                   grip_ridge_dia, grip_arc_dist, grip_count) in inserts.items():
             assert clearance > 0, f"{name}: clearance not positive"
-            assert depth > 0, f"{name}: depth not positive"
-            assert wall >= 0, f"{name}: wall not non-negative"
-            assert nominal > 0, f"{name}: nominal dia not positive"
-            assert grip_edge_chamfer >= 0, f"{name}: grip edge chamfer not non-negative"
+            assert hole_depth > 0, f"{name}: hole_depth not positive"
+            assert grip_chamfer >= 0, f"{name}: grip_chamfer not non-negative"
+            assert grip_ridge_dia > 0, f"{name}: grip_ridge_dia not positive"
+            assert grip_arc_dist > 0, f"{name}: grip_arc_dist not positive"
+            assert grip_count >= 1, f"{name}: grip_count not positive"
 
-    def test_clearance_greater_than_nominal(self):
-        """Clearance hole diameter must be greater than the nominal thread diameter."""
+    def test_clearance_greater_than_grip_ridge(self):
+        """Clearance hole diameter must be greater than the grip ridge diameter."""
         inserts = get_default_grip_ridge_inserts()
-        for name, (clearance, depth, wall, nominal, grip_edge_chamfer) in inserts.items():
-            assert clearance > nominal, \
-                f"{name}: clearance {clearance} <= nominal {nominal}"
+        for name, (clearance, hole_depth, grip_chamfer,
+                   grip_ridge_dia, grip_arc_dist, grip_count) in inserts.items():
+            assert clearance > grip_ridge_dia, \
+                f"{name}: clearance {clearance} <= grip_ridge_dia {grip_ridge_dia}"
 
 
 class TestLoadConfig:
@@ -250,7 +248,7 @@ class TestLoadConfig:
             'M3 x 5.7mm (standard)': '4.4, 5.7, 1.6'
         }
         config['GripRidgeInserts'] = {
-            'M3 Grip': '3.2, 7.0, 1.6, 3.0, 0.5'
+            'M3 Grip': '3.2, 7, 0.19, 1.5, 2.05, 3'
         }
         with open(config_file, 'w') as f:
             config.write(f)

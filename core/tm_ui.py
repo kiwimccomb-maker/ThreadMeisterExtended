@@ -188,19 +188,17 @@ def updateInfoText(inputs):
         is_grip_ridge = insertName in tm_state.GRIP_RIDGE_INSERTS
 
         if is_grip_ridge:
-            clearanceDia, configInsertLen, minWall, nominalDia, _ = tm_state.GRIP_RIDGE_INSERTS[insertName]
+            (clearanceDia, holeDepth, gripChamferSize,
+             gripRidgeDia, gripArcDistance, gripCount) = tm_state.GRIP_RIDGE_INSERTS[insertName]
             holeDia = clearanceDia
-            arc_dia = 0.5 * nominalDia
 
             # Use spinner value if visible (it's stored in cm internally),
-            # otherwise fall back to the calculated default in mm
+            # otherwise fall back to the configured hole depth
             depthInput = inputs.itemById('gripEdgeDepth')
             if depthInput and depthInput.isVisible:
                 totalDepth = depthInput.value * 10.0
             else:
-                totalDepth = (configInsertLen
-                              + tm_state.CONFIG['blind_hole_extra_depth']
-                              + tm_state.CONFIG['chamfer_size'])
+                totalDepth = holeDepth
         else:
             holeDia, insertLen, minWall = tm_state.INSERT_SPECS[insertName]
 
@@ -222,13 +220,12 @@ def updateInfoText(inputs):
 
         if is_grip_ridge:
             grip_chamfer_angle = tm_state.CONFIG.get('grip_chamfer_angle', 60)
-            chamfer_info = f'{tm_state.CONFIG["chamfer_size"]}mm @ {grip_chamfer_angle}°' if chamferOn else 'Off'
+            chamfer_info = f'{gripChamferSize}mm @ {grip_chamfer_angle}°' if chamferOn else 'Off'
             info = (f'<b>{insertName}</b><br/>' +
                     f'Hole: {holeDia:.1f} mm  ·  Depth: {totalDepth:.1f} mm<br/>' +
-                    f'Ridges: 3× Ø{arc_dia:.1f} mm<br/>' +
+                    f'Ridges: {gripCount}× Ø{gripRidgeDia:.1f} mm at {gripArcDistance:.2f} mm<br/>' +
                     f'Chamfer: {chamfer_info}<br/>' +
-                    f'Hole depth: {depthStr}<br/>' +
-                    f'Min wall: {minWall} mm')
+                    f'Hole depth: {depthStr}')
         else:
             info = (f'<b>{insertName}</b><br/>' +
                     f'Hole: {holeDia} mm  ·  Depth: {insertLen} mm<br/>' +

@@ -402,24 +402,25 @@ def findChamferEdge(extrudeFeature, targetBody, sketch, circleCenter, holeDiamet
         return None
 
 
-def getGripRidgeChamferEdges(extrudeFeature, targetBody, referenceSketch, referencePoint2d, nominal_dia_mm):
+def getGripRidgeChamferEdges(extrudeFeature, targetBody, referenceSketch, referencePoint2d, grip_ridge_dia_mm, grip_count=3):
     """
-    Find the 3 grip ridge arc edges at the hole entrance for chamfering.
+    Find the grip ridge arc edges at the hole entrance for chamfering.
 
     After a cut extrude, the hole has arc edges at both the top and bottom.
-    The grip ridge arcs have a specific radius from the GRIP_RIDGE_INSERTS spec.
+    The grip ridge arcs have a specific diameter from the GRIP_RIDGE_INSERTS spec.
     This function finds ALL arcs on the body matching that radius, then
-    selects the 3 at the top (sketch plane).
+    selects the ones at the top (sketch plane).
 
     Args:
         extrudeFeature: The extrude feature (unused, kept for API compatibility)
         targetBody: The body that was cut.
         referenceSketch: The temp sketch on the hole face.
         referencePoint2d: The projected sketch point geometry (2D, in sketch coords).
-        nominal_dia_mm: The nominal thread diameter in mm from GRIP_RIDGE_INSERTS.
+        grip_ridge_dia_mm: Diameter of grip ridge arc circles in mm.
+        grip_count: Expected number of grip ridges (default 3).
 
     Returns:
-        ObjectCollection of 3 grip ridge edges, or None.
+        ObjectCollection of grip_count grip ridge edges, or None.
     """
     try:
         # 1. Get 3D center and sketch plane normal
@@ -431,15 +432,12 @@ def getGripRidgeChamferEdges(extrudeFeature, targetBody, referenceSketch, refere
         (_origin, _xAxis, _yAxis, zAxis) = referenceSketch.transform.getAsCoordinateSystem()
 
         # Expected grip ridge arc radius in cm (Fusion internal units).
-        # Matches create_grip_ridge_sketch: arc_circle_dia = 0.5 * nominal_dia_mm
-        # so radius = arc_circle_dia / 2 = 0.25 * nominal_dia_mm, then /10 for cm.
-        expected_grip_radius_cm = (0.5 * nominal_dia_mm) / 2.0 / 10.0
+        expected_grip_radius_cm = grip_ridge_dia_mm / 2.0 / 10.0
 
         radius_tol = 0.005    # 0.05 mm in cm
         plane_tol = 0.005     # 0.05 mm in cm
 
         # 2. Find ALL arc edges matching the grip ridge radius (top and bottom)
-        matching_edges = []
         arc_count = 0
         circle_count = 0
         radius_match_top = []  # (edge, z_projection) at top
@@ -489,25 +487,27 @@ def getGripRidgeChamferEdges(extrudeFeature, targetBody, referenceSketch, refere
         tm_helpers.log('  Arc edges={}, Circle edges={}'.format(arc_count, circle_count))
         tm_helpers.log('  Radius match (top={}): [{}]'.format(len(radius_match_top), top_radii))
         tm_helpers.log('  Radius match (bot={}): [{}]'.format(len(radius_match_bottom), bot_radii))
-        tm_helpers.log('  Expected radius={} cm (nominal_dia={} mm)'.format(
-            expected_grip_radius_cm, nominal_dia_mm))
+        tm_helpers.log('  Expected radius={} cm (grip_ridge_dia={} mm)'.format(
+            expected_grip_radius_cm, grip_ridge_dia_mm))
+        tm_helpers.log('  Expected grip_count={}'.format(grip_count))
 
-        if len(radius_match_top) < 3:
+        if len(radius_match_top) < grip_count:
             if tm_state._ui:
                 tm_state._ui.messageBox(
-                    'Grip ridge chamfer: found {} top edges (need 3).\n'
+                    'Grip ridge chamfer: found {} top edges (need {}).\n'
                     'Expected radius: {:.4f} cm\n'
                     'Top edges: {}, Bottom edges: {}\n'
                     'Arc={}, Circle={}'.format(
-                        len(radius_match_top), expected_grip_radius_cm,
+                        len(radius_match_top), grip_count,
+                        expected_grip_radius_cm,
                         len(radius_match_top), len(radius_match_bottom),
                         arc_count, circle_count))
             return None
 
-        # 3. Return the 3 top edges
+        # 3. Return the top edges
         radius_match_top.sort(key=lambda x: x[1])
         result = adsk.core.ObjectCollection.create()
-        for edge, _ in radius_match_top[:3]:
+        for edge, _ in radius_match_top[:grip_count]:
             result.add(edge)
 
         tm_helpers.log('GripRidgeChamfer: returning {} edges'.format(result.count))
@@ -714,19 +714,22 @@ def addBottomRadiusToBlindHole(component, extrudeFeature, targetBody, sketch, ci
         return None
 
 
-def create_grip_ridge_sketch(sketch, center_point_2d, clearance_dia_mm, nominal_dia_mm):
+def create_grip_ridge_sketch(sketch, center_point_2d, clearance_dia_mm,
+                              grip_ridge_dia_mm, grip_arc_distance_mm, grip_count=3):
     """
     Create a grip-ridge insert profile in the given sketch.
 
-    Draws a central clearance hole and three arc grip ridges at 120° intervals.
-    Each arc circle has diameter = 0.5 * nominal_dia_mm, centred at distance
-    0.6 * nominal_dia_mm from the centre.
+    Draws a central clearance hole and N arc grip ridges at equal angular
+    intervals. Each arc circle has diameter = grip_ridge_dia_mm,
+    centred at distance grip_arc_distance_mm from the centre.
 
     Args:
         sketch: Fusion 360 Sketch object
         center_point_2d: Point2D at the sketch centre
         clearance_dia_mm: Clearance hole diameter in mm
-        nominal_dia_mm: Nominal (major) thread diameter in mm
+        grip_ridge_dia_mm: Diameter of each grip ridge arc circle in mm
+        grip_arc_distance_mm: Distance from hole centre to arc circle centre in mm
+        grip_count: Number of grip ridges (default 3)
 
     Returns:
         The combined profile (largest profile containing the centre point),
@@ -735,18 +738,17 @@ def create_grip_ridge_sketch(sketch, center_point_2d, clearance_dia_mm, nominal_
     try:
         # Convert mm to cm (Fusion internal units)
         clearance_radius = clearance_dia_mm / 2.0 / 10.0
-
-        arc_circle_dia = 0.5 * nominal_dia_mm
-        arc_circle_radius = arc_circle_dia / 2.0 / 10.0
-        arc_center_distance = 0.6 * nominal_dia_mm / 10.0
+        arc_circle_radius = grip_ridge_dia_mm / 2.0 / 10.0
+        arc_center_distance = grip_arc_distance_mm / 10.0
 
         # Draw central clearance hole circle
         sketch.sketchCurves.sketchCircles.addByCenterRadius(
             center_point_2d, clearance_radius)
 
-        # Draw three arc grip ridge circles at 0°, 120°, 240°
+        # Draw grip ridge circles at equal angular intervals
         grip_circles = []
-        for angle_deg in (0.0, 120.0, 240.0):
+        for i in range(grip_count):
+            angle_deg = 360.0 * i / grip_count
             angle_rad = math.radians(angle_deg)
             arc_x = center_point_2d.x + arc_center_distance * math.cos(angle_rad)
             arc_y = center_point_2d.y + arc_center_distance * math.sin(angle_rad)

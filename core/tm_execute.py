@@ -49,16 +49,14 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
             is_grip_ridge = insertName in tm_state.GRIP_RIDGE_INSERTS
 
             if is_grip_ridge:
-                clearanceDia, configInsertLen, minWall, nominalDia, gripChamferSize = tm_state.GRIP_RIDGE_INSERTS[insertName]
-                # Pre-calculate the default total depth (insert + extra depth)
-                # Chamfer is applied to the edge AFTER extrusion, not part of hole depth
-                configDepth = configInsertLen + tm_state.CONFIG['blind_hole_extra_depth']
-                # Use spinner value if present and visible, otherwise calculated default
+                (clearanceDia, holeDepth, gripChamferSize,
+                 gripRidgeDia, gripArcDistance, gripCount) = tm_state.GRIP_RIDGE_INSERTS[insertName]
+                # Use spinner value if present and visible, otherwise use configured hole depth
                 # Note: gripEdgeDepthInput.value is in cm (Fusion's internal unit), convert to mm
                 if gripEdgeDepthInput is not None and gripEdgeDepthInput.isVisible:
                     insertLen = gripEdgeDepthInput.value * 10.0  # cm -> mm
                 else:
-                    insertLen = configDepth
+                    insertLen = holeDepth
                 holeDia = clearanceDia
             else:
                 holeDia, insertLen, minWall = tm_state.INSERT_SPECS[insertName]
@@ -94,7 +92,10 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
 
                 if is_grip_ridge:
                     profile_or_collection = create_grip_ridge_sketch(
-                        tempSketch, projectedPoint.geometry, clearanceDia, nominalDia)
+                        tempSketch, projectedPoint.geometry, clearanceDia,
+                        grip_ridge_dia_mm=gripRidgeDia,
+                        grip_arc_distance_mm=gripArcDistance,
+                        grip_count=gripCount)
                     if profile_or_collection is None:
                         failedCount += 1
                         failMessages.append(
@@ -162,7 +163,7 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                         if gripEdgeDepthInput is not None and gripEdgeDepthInput.isVisible:
                             depth_mm = gripEdgeDepthInput.value * 10.0  # cm -> mm
                         else:
-                            depth_mm = configDepth  # already in mm
+                            depth_mm = holeDepth  # already in mm
                     else:
                         # Standard: insert length + extra depth + chamfer
                         chamfer = tm_state.CONFIG['chamfer_size'] if includeChamfer else 0.0
@@ -186,7 +187,9 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                         # Grip-ridge: chamfer grip ridge arcs with the insert-specific chamfer size.
                         grip_chamfer_angle = tm_state.CONFIG.get('grip_chamfer_angle', 60)
                         gripEdges = getGripRidgeChamferEdges(
-                            extrude, targetBody, tempSketch, projectedPoint.geometry, nominal_dia_mm=nominalDia)
+                            extrude, targetBody, tempSketch, projectedPoint.geometry,
+                            grip_ridge_dia_mm=gripRidgeDia,
+                            grip_count=gripCount)
                         if gripEdges and gripEdges.count > 0:
                             addAngleChamferToEdge(
                                 component, gripEdges,
