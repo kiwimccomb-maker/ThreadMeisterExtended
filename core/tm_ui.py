@@ -83,16 +83,12 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             holeTypeGroup.listItems.add('Through Hole', not saved_is_blind)
 
             # Grip-edge depth override (hidden unless a grip-ridge insert is selected)
-            # Default value is the FULL calculated hole depth (insert + extra + chamfer)
-            # so the user sees and controls the actual hole depth directly.
-            _, configInsertLen, _, _, _ = tm_state.GRIP_RIDGE_INSERTS.get(
-                lastSelected, (0, 7.0, 0, 0, 0))
+            # Default value is the configured hole depth from the grip ridge spec.
+            _, configHoleDepth, _, _, _, _ = tm_state.GRIP_RIDGE_INSERTS.get(
+                lastSelected, (0, 7.0, 0, 0, 0, 3))
             isGripDefault = lastSelected in tm_state.GRIP_RIDGE_INSERTS
-            defaultTotalDepth = (configInsertLen
-                                 + tm_state.CONFIG['blind_hole_extra_depth']
-                                 + tm_state.CONFIG['chamfer_size'])
             inputs.addFloatSpinnerCommandInput(
-                'gripEdgeDepth', 'Hole Depth (mm)', 'mm', 0.1, 100.0, defaultTotalDepth, 1)
+                'gripEdgeDepth', 'Hole Depth (mm)', 'mm', 0.1, 100.0, configHoleDepth, 1)
             depthInput = inputs.itemById('gripEdgeDepth')
             depthInput.isVisible = isGripDefault
 
@@ -146,11 +142,8 @@ class InputChangedHandler(adsk.core.InputChangedEventHandler):
                 if depthInput:
                     depthInput.isVisible = isGrip
                     if isGrip:
-                        _, configInsertLen, _, _, _ = tm_state.GRIP_RIDGE_INSERTS[insertName]
-                        totalDepth = (configInsertLen
-                                      + tm_state.CONFIG['blind_hole_extra_depth']
-                                      + tm_state.CONFIG['chamfer_size'])
-                        depthInput.value = totalDepth
+                        _, configHoleDepth, _, _, _, _ = tm_state.GRIP_RIDGE_INSERTS[insertName]
+                        depthInput.value = configHoleDepth
 
             if changedInput.id in ('insertSize', 'holeType', 'addChamfer', 'gripEdgeDepth'):
                 updateInfoText(inputs)
