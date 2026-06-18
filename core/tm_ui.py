@@ -84,11 +84,12 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
 
             # Grip-edge depth override (hidden unless a grip-ridge insert is selected)
             # Default value is the configured hole depth from the grip ridge spec.
+            # Spinner defaultValue must be in cm (Fusion internal units).
             _, configHoleDepth, _, _, _, _ = tm_state.GRIP_RIDGE_INSERTS.get(
                 lastSelected, (0, 7.0, 0, 0, 0, 3))
             isGripDefault = lastSelected in tm_state.GRIP_RIDGE_INSERTS
             inputs.addFloatSpinnerCommandInput(
-                'gripEdgeDepth', 'Hole Depth (mm)', 'mm', 0.1, 100.0, configHoleDepth, 1)
+                'gripEdgeDepth', 'Hole Depth (mm)', 'mm', 0.1, 100.0, configHoleDepth / 10.0, 1)
             depthInput = inputs.itemById('gripEdgeDepth')
             depthInput.isVisible = isGripDefault
 
@@ -143,7 +144,7 @@ class InputChangedHandler(adsk.core.InputChangedEventHandler):
                     depthInput.isVisible = isGrip
                     if isGrip:
                         _, configHoleDepth, _, _, _, _ = tm_state.GRIP_RIDGE_INSERTS[insertName]
-                        depthInput.value = configHoleDepth
+                        depthInput.value = configHoleDepth / 10.0
 
             if changedInput.id in ('insertSize', 'holeType', 'addChamfer', 'gripEdgeDepth'):
                 updateInfoText(inputs)
