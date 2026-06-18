@@ -10,7 +10,8 @@
       "Bash(findstr *)",
       "Bash(type *)",
       "Bash(git checkout *)",
-      "Bash(pytest *)"
+      "Bash(pytest *)",
+      "Bash(git add *)"
     ]
   },
   "$version": 4

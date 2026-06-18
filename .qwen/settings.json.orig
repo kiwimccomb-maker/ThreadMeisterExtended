@@ -9,7 +9,8 @@
       "Bash(\"c:\\users\\pulsar workshop\\anaconda3\\python.exe\" *)",
       "Bash(findstr *)",
       "Bash(type *)",
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "Bash(pytest *)"
     ]
   },
   "$version": 4
