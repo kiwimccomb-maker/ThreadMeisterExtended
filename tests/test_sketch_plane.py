@@ -44,8 +44,8 @@ def test_consumed_face_is_explained_and_names_the_sketch():
     said = str(caught.value)
     # The three things somebody needs: which sketch, why, and what to do about it.
     assert 'Face sketch' in said
-    assert 'later feature' in said
-    assert 'Roll the timeline back' in said
+    assert 'will not resolve' in said
+    assert 'no face left' in said
     assert 'construction plane' in said
     # And the original is kept, so a log still has the API's own words.
     assert caught.value.__cause__ is err

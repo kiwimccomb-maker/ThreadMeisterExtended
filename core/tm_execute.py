@@ -7,6 +7,7 @@ import tm_state
 import tm_config
 from tm_helpers import calc_blind_hole_depth_mm
 from tm_geometry import (
+    findCoplanarFace,
     findProfileForCircle,
     findExtrudeDirectionFromSketch,
     findChamferEdge,
@@ -45,10 +46,11 @@ def sketch_plane_of(parentSketch):
         if 'BRefFace' not in str(e) and 'referencePlane' not in str(e):
             raise
         raise RuntimeError(
-            f'the sketch "{parentSketch.name}" is on a model face that a later feature '
-            'has changed, so Fusion will not reopen it from the end of the timeline. '
-            'Roll the timeline back to just after that sketch and run this again, or '
-            'put the sketch on a construction plane, which nothing can consume.') from e
+            f'the sketch "{parentSketch.name}" is on a model face that Fusion will not '
+            'resolve from this timeline position, and the target body has no face left '
+            'in that sketch\'s plane to use instead. Check you picked the body the '
+            'sketch was drawn on, or put the sketch on a construction plane, which '
+            'nothing can consume.') from e
 
 
 def summarise_failures(failures):
@@ -152,10 +154,19 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
 
                 try:
                     face = sketch_plane_of(parentSketch)
-                except RuntimeError as e:
-                    failedCount += 1
-                    failures.append((point_idx + 1, str(e)))
-                    continue
+                except RuntimeError as planeError:
+                    # Fusion would not resolve the face the sketch was drawn on. It
+                    # does not have to: a face of the body lying in the sketch's plane
+                    # puts the temp sketch in the same place, and is read off the body
+                    # as it is now rather than out of the sketch's history.
+                    face = findCoplanarFace(targetBody, parentSketch, center2d)
+                    if face is None:
+                        failedCount += 1
+                        failures.append((point_idx + 1, str(planeError)))
+                        continue
+                    tm_helpers.log(
+                        f'Point {point_idx+1}: referencePlane refused, using the '
+                        f'coplanar face of {targetBody.name} instead')
 
                 # Clean sketch without auto-projected body edges
                 tempSketch = component.sketches.addWithoutEdges(face)

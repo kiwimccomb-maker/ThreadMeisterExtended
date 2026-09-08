@@ -35,10 +35,11 @@ class Recorder:
     face it is on, so `cuts` flipping to 1 is what kills it.
     """
 
-    def __init__(self, face_already_gone=False):
+    def __init__(self, face_already_gone=False, coplanar_faces=()):
         self.calls = []
         self.cuts = 0
         self.face_already_gone = face_already_gone
+        self.coplanar_faces = coplanar_faces
 
     @property
     def face_is_available(self):
@@ -65,6 +66,9 @@ class Recorder:
 def build_args(recorder, insert_name, point_count):
     """One sketch, several points on it - the normal way this add-in is used."""
     body = MagicMock()
+    body.name = 'Body1'
+    # What the coplanar-face fallback has to work with
+    body.faces = list(recorder.coplanar_faces)
     component = body.parentComponent
     component.parentDesign.timeline.markerPosition = 3
     component.sketches.addWithoutEdges = recorder.new_sketch
@@ -175,8 +179,8 @@ class TestFaceSurvivesTheRun:
 
 
 class TestFaceAlreadyGone:
-    """A face the user's own later feature consumed. Rolling back is the real fix
-    here, and that is what the message says."""
+    """referencePlane refuses AND the body has no face in the sketch's plane, so
+    there is genuinely nothing left to sketch on."""
 
     def test_no_holes_and_one_grouped_explanation(self):
         rec = Recorder(face_already_gone=True)
@@ -196,7 +200,59 @@ class TestFaceAlreadyGone:
         # One paragraph naming all three points, not the same one three times
         assert said.count('Sketch3') == 1, 'the reason is shared, so say it once'
         assert 'Points 1, 2, 3' in said
-        assert 'Roll the timeline back' in said
+        assert 'construction plane' in said
+
+
+def a_coplanar_face():
+    """A planar face of the body in the sketch's plane, which is all the temp sketch
+    needs. findCoplanarFace is unit-tested in test_coplanar_face.py; here it is
+    stubbed so this file stays about the run surviving."""
+    return MagicMock()
+
+
+class TestReferencePlaneAlwaysRefuses:
+    """What the user actually hit: Fusion refuses the historical face from the very
+    first point, with nothing of ours having touched the model yet. Rolling the
+    timeline back does not help, so the run has to stop needing that face."""
+
+    @pytest.fixture(autouse=True)
+    def coplanar_face_found(self, monkeypatch):
+        monkeypatch.setattr(tm_execute, 'findCoplanarFace',
+                            lambda *a, **k: a_coplanar_face())
+
+    @pytest.mark.parametrize('insert_name', ['M3 x 5.7mm (standard)', 'M3 Grip'])
+    def test_all_holes_are_still_cut(self, insert_name):
+        rec = Recorder(face_already_gone=True)
+
+        CommandExecuteHandler().notify(build_args(rec, insert_name, 3))
+
+        assert rec.cuts_made == 3, 'the fallback should carry the whole run'
+
+    def test_nothing_is_reported_as_failed(self):
+        rec = Recorder(face_already_gone=True)
+        ui = MagicMock()
+        import tm_state
+        tm_state._ui = ui
+        monkeyed = tm_state.CONFIG['show_success_message']
+        tm_state.CONFIG['show_success_message'] = True
+        try:
+            CommandExecuteHandler().notify(build_args(rec, 'M3 Grip', 3))
+        finally:
+            tm_state.CONFIG['show_success_message'] = monkeyed
+            tm_state._ui = None
+
+        said = ui.messageBox.call_args[0][0]
+        assert 'failed' not in said, said
+        assert 'Successfully created 3' in said
+
+    def test_sketches_still_all_precede_the_cutting(self):
+        """The fallback must not reintroduce interleaving."""
+        rec = Recorder(face_already_gone=True)
+
+        CommandExecuteHandler().notify(build_args(rec, 'M3 Grip', 3))
+
+        first_cut = rec.calls.index('cut')
+        assert 'sketch' not in rec.calls[first_cut:]
 
 
 class TestSummariseFailures:

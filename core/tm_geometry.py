@@ -224,6 +224,64 @@ def findProfileForCircle(sketch, target_circle):
     return coll
 
 
+def findCoplanarFace(targetBody, sketch, circleCenter):
+    """A planar face of the body lying in the sketch's own plane.
+
+    `Sketch.referencePlane` resolves the face the sketch was drawn on *as it was
+    then*, which Fusion will not do from an arbitrary timeline position - it asks you
+    to roll the timeline back to the sketch first. The temp sketch does not actually
+    need that historical face: it needs a plane in the same place, and any face of the
+    body lying in the sketch's plane gives precisely that, read off the body as it is
+    now.
+
+    The sketch's transform carries the plane's position and orientation and needs no
+    B-Rep face to read, so it is the reliable half of the pair.
+
+    Returns:
+        A planar BRepFace in the sketch's plane, or None if the body has none.
+    """
+    try:
+        (_origin, _xAxis, _yAxis, zAxis) = sketch.transform.getAsCoordinateSystem()
+        center3D = adsk.core.Point3D.create(circleCenter.x, circleCenter.y, 0.0)
+        center3D.transformBy(sketch.transform)
+
+        best = None
+        best_area = -1.0
+
+        for face in targetBody.faces:
+            geometry = face.geometry
+            if geometry.surfaceType != adsk.core.SurfaceTypes.PlaneSurfaceType:
+                continue
+
+            # Parallel to the sketch plane
+            normal = geometry.normal
+            dot = abs(normal.x * zAxis.x + normal.y * zAxis.y + normal.z * zAxis.z)
+            if dot < 0.999:
+                continue
+
+            # ...and in it, not merely parallel to it: a plate's opposite face is
+            # parallel but offset by its thickness.
+            face_origin = geometry.origin
+            offset = ((center3D.x - face_origin.x) * normal.x +
+                      (center3D.y - face_origin.y) * normal.y +
+                      (center3D.z - face_origin.z) * normal.z)
+            if abs(offset) > 1e-4:      # 0.001 mm in cm
+                continue
+
+            # Any coplanar face yields the same sketch plane, so size is only a
+            # tie-break - the face the user sketched on is usually the big one.
+            area = face.area
+            if area > best_area:
+                best_area = area
+                best = face
+
+        return best
+
+    except Exception:
+        tm_helpers.log('Error in findCoplanarFace:\n{}'.format(traceback.format_exc()))
+        return None
+
+
 def findExtrudeDirectionFromSketch(sketch, circleCenter, targetBody):
     """
     Determine extrude direction by checking which side of the sketch plane
