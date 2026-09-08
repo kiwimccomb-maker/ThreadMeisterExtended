@@ -40,6 +40,7 @@ call :CleanupOldNames
 call :CopyFile "ThreadMeisterExtended.py"
 call :CopyCore
 call :CopyFile "ThreadMeisterExtended.manifest"
+call :CopyFile "ThreadMeisterExtended.png"
 call :CopyFile "manifest.json"
 call :CopyFile "License.txt"
 call :CopyFile "Readme.md"
