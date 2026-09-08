@@ -19,6 +19,33 @@ from tm_geometry import (
 )
 
 
+def sketch_plane_of(parentSketch):
+    """The plane or face a sketch was drawn on, or a plain explanation of why not.
+
+    Fusion refuses to hand over `referencePlane` when a sketch sits on a model face and
+    that face no longer exists at the current timeline position, because a later feature
+    consumed or reshaped it. Raw, that arrives as
+
+        RuntimeError: 3 : referencePlane is a BRefFace -
+        need to roll timeline back before sketch
+
+    in the middle of a traceback, which names neither the sketch nor anything to do
+    about it. Rolling the timeline back here is not the answer: features created while
+    rolled back land before the ones that consumed the face, which can break them. So
+    the cause is named and the caller skips that point.
+    """
+    try:
+        return parentSketch.referencePlane
+    except RuntimeError as e:
+        if 'BRefFace' not in str(e) and 'referencePlane' not in str(e):
+            raise
+        raise RuntimeError(
+            f'the sketch "{parentSketch.name}" is on a model face that a later feature '
+            'has changed, so Fusion will not reopen it from the end of the timeline. '
+            'Roll the timeline back to just after that sketch and run this again, or '
+            'put the sketch on a construction plane, which nothing can consume.') from e
+
+
 class CommandExecuteHandler(adsk.core.CommandEventHandler):
     def notify(self, args):
         try:
@@ -86,7 +113,14 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                 center2d = point.geometry
 
                 # Create clean sketch without auto-projected body edges
-                face = parentSketch.referencePlane
+                try:
+                    face = sketch_plane_of(parentSketch)
+                except RuntimeError as e:
+                    # One unusable point should not throw away the holes that worked, or
+                    # the ones after it. The loop already counts and reports failures.
+                    failedCount += 1
+                    failMessages.append(f'Point {point_idx+1}: {e}')
+                    continue
                 tempSketch = component.sketches.addWithoutEdges(face)
                 tempSketch.name = f"TM_{insertName}_P{point_idx+1}"
 
