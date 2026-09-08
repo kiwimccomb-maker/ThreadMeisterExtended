@@ -31,6 +31,7 @@
 * **Direct integration** - Holes are cut directly into your part, no manual combine operations needed
 * **User-friendly interface** - Button in SOLID > MODIFY menu with intuitive dialog
 * **Fully customizable** - All dimensions, chamfers, and grip ridge parameters editable via `config.ini`
+* **In-dialog Settings** - Change the design parameters without leaving Fusion; they apply to the holes you are about to cut and are saved back to `config.ini`
 
 <br>
 
@@ -124,7 +125,8 @@ git clone https://github.com/kiwimccomb/ThreadMeisterExtended.git ThreadMeisterE
 6. Choose your **insert size** (e.g., M3 x 5.7mm standard, or M3 Grip)
 7. Choose **Blind Hole** or **Through Hole**
 8. Enable/disable top **chamfer** and bottom **fillet** (recommended: enabled)
-9. Click **OK**
+9. Optionally open **Settings** to adjust chamfer size, depths and the grip chamfer angle
+10. Click **OK**
 
 ### Standard Insert Specifications
 
@@ -148,7 +150,10 @@ All dimensions follow CNC Kitchen's official recommendations:
 
 ### Customize settings
 
-Edit `config.ini` to adjust behavior. The file is located in the add-in folder. The config is organized into four sections:
+Most of the day-to-day parameters can be changed from the **Settings** group at
+the bottom of the ThreadMeister dialog — see [In-dialog Settings](#in-dialog-settings)
+below. Everything, including the insert tables, can be edited in `config.ini`,
+located in the add-in folder. The config is organized into five sections:
 
 `[Settings]` — Design parameters
 
@@ -157,7 +162,7 @@ Edit `config.ini` to adjust behavior. The file is located in the add-in folder. 
 | `chamfer_size` | 0.5 | Top chamfer size in mm (45° chamfer) |
 | `blind_hole_extra_depth` | 1.0 | Extra depth added to blind holes in mm |
 | `bottom_radius_size` | 0.5 | Bottom fillet radius in mm (blind holes only) |
-| `grip_chamfer_angle` | 60 | Chamfer angle for grip ridge arcs in degrees |
+| `grip_chamfer_angle` | 78 | Chamfer angle for grip ridge arcs in degrees |
 
 `[Inserts]` — Standard insert specifications
 
@@ -170,6 +175,30 @@ Each line defines a grip ridge insert: `name = clearance_dia, hole_depth, grip_e
 `[UI State]` — Remembered menu state (saved automatically between sessions)
 
 `[Developer]` — Debug options
+
+### In-dialog Settings
+
+Expand the **Settings** group at the bottom of the ThreadMeister dialog to change
+these without editing `config.ini` by hand. Values apply to the holes created by
+that click of **OK**, and are written back to `config.ini` so they stick.
+
+| Setting | Config key | Section | Range |
+|----|----|----|----|
+| Chamfer Size (mm) | `chamfer_size` | `[Settings]` | 0.1 – 5.0 |
+| Blind Hole Extra Depth (mm) | `blind_hole_extra_depth` | `[Settings]` | 0.0 – 10.0 |
+| Bottom Fillet Radius (mm) | `bottom_radius_size` | `[Settings]` | 0.0 – 5.0 |
+| Grip Chamfer Angle (deg) | `grip_chamfer_angle` | `[Settings]` | 15 – 85 |
+| Show Success Message | `show_success_message` | `[UI State]` | on / off |
+| Enable Logging | `enable_logging` | `[Developer]` | on / off |
+
+The info panel updates live as you change the chamfer size, extra depth or grip
+chamfer angle, so you can see the resulting hole depth before committing.
+
+Cancelling the dialog changes nothing — settings are only saved on **OK**.
+
+The insert tables (`[Inserts]`, `[GripRidgeInserts]`) are still edited in
+`config.ini`; the grip ridge hole depth is the exception and has its own spinner
+in the dialog whenever a Grip insert is selected.
 
 ## Screenshots
 
@@ -217,12 +246,12 @@ Each line defines a grip ridge insert: `name = clearance_dia, hole_depth, grip_e
 
 ## Changelog
 
-### v1.3.3 — 2026-06-16
+### v1.3.2 — 2026-06-16
 
 * **Grip Ridge inserts** — full support for configurable multi-arc grip ridge holes
 * Added `[GripRidgeInserts]` section to config.ini with 6 parameters per insert
 * Grip ridge geometry fully customizable: ridge diameter, arc distance, grip count, chamfer size
-* Per-insert chamfer sizes for grip ridges (e.g., M10 = 0.4mm, M3 = 0.19mm)
+* Per-insert chamfer sizes for grip ridges (e.g., M10 = 0.6mm, M3 = 0.28mm)
 * Depth spinner now uses configured `hole_depth` directly (no more insert+extra+chamfer calculation)
 * Credit: Grip Ridge feature inspired by **Made With Layers** (Thomas Salanderer)
 

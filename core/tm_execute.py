@@ -33,6 +33,12 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
             gripEdgeDepthInput = inputs.itemById('gripEdgeDepth')
             shouldExport = exportDebugInput is not None and exportDebugInput.value
 
+            # Settings group: apply before anything reads CONFIG so the change
+            # lands on this run too, then persist it to config.ini.
+            settings = tm_config.read_settings_inputs(inputs)
+            tm_state.CONFIG.update(settings)
+            tm_config.save_settings(settings)
+
             targetBody = bodySelect.selection(0).entity
             selectedPoints = [pointSelect.selection(i).entity for i in range(pointSelect.selectionCount)]
 
@@ -41,10 +47,11 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
 
             isBlindHole = holeType.selectedItem.name == 'Blind Hole'
             includeChamfer = addChamfer.value if addChamfer else tm_state.CONFIG.get('chamfer_enabled_default', True)
-            includeBottomRadius = (addBottomRadius.value if addBottomRadius else tm_state.CONFIG.get('bottom_radius_enabled_default', False)) and isBlindHole
+            bottomRadiusChecked = addBottomRadius.value if addBottomRadius else tm_state.CONFIG.get('bottom_radius_enabled_default', False)
+            includeBottomRadius = bottomRadiusChecked and isBlindHole
             showMessage = tm_state.CONFIG.get('show_success_message', True)
 
-            tm_config.save_checkbox_states(includeChamfer, includeBottomRadius, showMessage, isBlindHole)
+            tm_config.save_checkbox_states(includeChamfer, bottomRadiusChecked, showMessage, isBlindHole)
 
             is_grip_ridge = insertName in tm_state.GRIP_RIDGE_INSERTS
 
@@ -57,6 +64,7 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                     insertLen = gripEdgeDepthInput.value * 10.0  # cm -> mm
                 else:
                     insertLen = holeDepth
+                gripDepthMm = insertLen
                 holeDia = clearanceDia
             else:
                 holeDia, insertLen, minWall = tm_state.INSERT_SPECS[insertName]
@@ -74,7 +82,7 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
 
             if design and hasattr(design, 'timeline'):
                 timeline = design.timeline
-                if timeline and timeline.count > 0:
+                if timeline:
                     startIndex = timeline.markerPosition
 
             for point_idx, point in enumerate(selectedPoints):
@@ -159,18 +167,13 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
 
                 if isBlindHole:
                     if is_grip_ridge:
-                        # Grip-ridge: spinner value is in cm (Fusion's internal unit), convert to mm
-                        if gripEdgeDepthInput is not None and gripEdgeDepthInput.isVisible:
-                            depth_mm = gripEdgeDepthInput.value * 10.0  # cm -> mm
-                        else:
-                            depth_mm = holeDepth  # already in mm
+                        depth_mm = gripDepthMm
                     else:
                         # Standard: insert length + extra depth + chamfer
                         chamfer = tm_state.CONFIG['chamfer_size'] if includeChamfer else 0.0
                         depth_mm = calc_blind_hole_depth_mm(
                             insertLen, tm_state.CONFIG['blind_hole_extra_depth'], chamfer)
-                    holeDepth = depth_mm / 10.0  # mm -> cm
-                    dist = adsk.core.ValueInput.createByReal(holeDepth)
+                    dist = adsk.core.ValueInput.createByReal(depth_mm / 10.0)  # mm -> cm
                     extent = adsk.fusion.DistanceExtentDefinition.create(dist)
                     extInput.setOneSideExtent(extent, direction)
                 else:
@@ -185,10 +188,11 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                 if includeChamfer:
                     if is_grip_ridge:
                         # Grip-ridge: chamfer grip ridge arcs with the insert-specific chamfer size.
-                        grip_chamfer_angle = tm_state.CONFIG.get('grip_chamfer_angle', 60)
+                        grip_chamfer_angle = tm_state.CONFIG.get('grip_chamfer_angle', 78)
                         gripEdges = getGripRidgeChamferEdges(
                             extrude, targetBody, tempSketch, projectedPoint.geometry,
                             grip_ridge_dia_mm=gripRidgeDia,
+                            grip_arc_distance_mm=gripArcDistance,
                             grip_count=gripCount)
                         if gripEdges and gripEdges.count > 0:
                             addAngleChamferToEdge(

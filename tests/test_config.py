@@ -86,7 +86,7 @@ class TestGetDefaultGripRidgeInserts:
          grip_ridge_dia, grip_arc_dist, grip_count) = inserts['M3 Grip']
         assert clearance == 3.2
         assert hole_depth == 7
-        assert grip_chamfer == 0.19
+        assert grip_chamfer == 0.28
         assert grip_ridge_dia == 1.5
         assert grip_arc_dist == 2.05
         assert grip_count == 3
@@ -99,9 +99,9 @@ class TestGetDefaultGripRidgeInserts:
          grip_ridge_dia, grip_arc_dist, grip_count) = inserts['M6 Grip']
         assert clearance == 6.3
         assert hole_depth == 10
-        assert grip_chamfer == 0.24
+        assert grip_chamfer == 0.42
         assert grip_ridge_dia == 2.7
-        assert grip_arc_dist == 3.5
+        assert grip_arc_dist == 4.0
         assert grip_count == 5
 
     def test_all_sizes_present(self):

@@ -10,7 +10,6 @@ import adsk
 from tm_geometry import (
     _filter_by_area,
     _filter_by_centroid,
-    _filter_by_bounding_box,
     _filter_by_curve_points,
     _accumulate_profiles,
     getGripRidgeChamferEdges,
@@ -65,6 +64,8 @@ def make_point(x, y, z=0.0):
 
     point.distanceTo = distance_to
     point.transformBy = lambda _transform: None
+    point.copy = lambda: make_point(point.x, point.y, point.z)
+    point.length = math.sqrt(x * x + y * y + z * z)
     return point
 
 
@@ -157,10 +158,10 @@ class TestFilterByArea:
 
         # profile1, profile2, profile3 should be included; profile4 excluded
         assert len(result) == 3
-        assert profile1 in [p for p, _ in result]
-        assert profile2 in [p for p, _ in result]
-        assert profile3 in [p for p, _ in result]
-        assert profile4 not in [p for p, _ in result]
+        assert profile1 in [p for p, _, _ in result]
+        assert profile2 in [p for p, _, _ in result]
+        assert profile3 in [p for p, _, _ in result]
+        assert profile4 not in [p for p, _, _ in result]
 
     def test_empty_profiles(self):
         """Empty profile list should return empty."""
@@ -181,7 +182,7 @@ class TestFilterByCentroid:
         circle_radius = 5.0
 
         profile = make_profile(area=10.0, centroid_x=0.0, centroid_y=0.0, centroid_z=0.0)
-        candidates = [(profile, 10.0)]
+        candidates = [(profile, 10.0, profile.areaProperties(None).centroid)]
 
         result = _filter_by_centroid(candidates, circle_center, circle_radius)
 
@@ -195,7 +196,7 @@ class TestFilterByCentroid:
 
         # Centroid at distance 5.0 from center
         profile = make_profile(area=10.0, centroid_x=5.0, centroid_y=0.0, centroid_z=0.0)
-        candidates = [(profile, 10.0)]
+        candidates = [(profile, 10.0, profile.areaProperties(None).centroid)]
 
         result = _filter_by_centroid(candidates, circle_center, circle_radius)
 
@@ -208,7 +209,7 @@ class TestFilterByCentroid:
 
         # Centroid at distance 6.0 from center
         profile = make_profile(area=10.0, centroid_x=6.0, centroid_y=0.0, centroid_z=0.0)
-        candidates = [(profile, 10.0)]
+        candidates = [(profile, 10.0, profile.areaProperties(None).centroid)]
 
         result = _filter_by_centroid(candidates, circle_center, circle_radius)
 
@@ -223,7 +224,7 @@ class TestFilterByCentroid:
         profile2 = make_profile(area=6.0, centroid_x=3.0, centroid_y=4.0)  # distance 5.0
         profile3 = make_profile(area=7.0, centroid_x=4.0, centroid_y=4.0)  # distance ~5.66 > 5.0
 
-        candidates = [(profile1, 5.0), (profile2, 6.0), (profile3, 7.0)]
+        candidates = [(profile1, 5.0, profile1.areaProperties(None).centroid), (profile2, 6.0, profile2.areaProperties(None).centroid), (profile3, 7.0, profile3.areaProperties(None).centroid)]
 
         result = _filter_by_centroid(candidates, circle_center, circle_radius)
 
@@ -293,8 +294,8 @@ class FakeGeometry:
 
 
 class FakeEdge:
-    def __init__(self, curveType, length=1.0):
-        self.geometry = FakeGeometry(curveType=curveType)
+    def __init__(self, curveType, length=1.0, geometry=None):
+        self.geometry = geometry if geometry is not None else FakeGeometry(curveType=curveType)
         self.length = length
 
 
@@ -399,7 +400,9 @@ class TestFilterByCurvePoints:
         reference_sketch = make_reference_sketch()
         reference_point = make_point(0.0, 0.0, 0.0)
 
-        edges = getGripRidgeChamferEdges(extrude, target_body, reference_sketch, reference_point, nominal_dia_mm=3.0)
+        edges = getGripRidgeChamferEdges(
+            extrude, target_body, reference_sketch, reference_point,
+            grip_ridge_dia_mm=1.5, grip_arc_distance_mm=1.8, grip_count=3)
 
         # Should return the 3 grip ridge arcs matching expected geometry
         assert edges is not None
@@ -453,7 +456,9 @@ class TestFilterByCurvePoints:
         reference_sketch = make_reference_sketch()
         reference_point = make_point(0.0, 0.0, 0.0)
 
-        edges = getGripRidgeChamferEdges(extrude, target_body, reference_sketch, reference_point, nominal_dia_mm=3.0)
+        edges = getGripRidgeChamferEdges(
+            extrude, target_body, reference_sketch, reference_point,
+            grip_ridge_dia_mm=1.5, grip_arc_distance_mm=1.8, grip_count=3)
 
         # Only the valid grip arc should match (but we need 3 for success)
         assert edges is None  # Fewer than 3 matching arcs
@@ -512,7 +517,9 @@ class TestFilterByCurvePoints:
         reference_sketch = make_reference_sketch()
         reference_point = make_point(0.0, 0.0, 0.0)
 
-        edges = getGripRidgeChamferEdges(extrude, target_body, reference_sketch, reference_point, nominal_dia_mm=3.0)
+        edges = getGripRidgeChamferEdges(
+            extrude, target_body, reference_sketch, reference_point,
+            grip_ridge_dia_mm=1.5, grip_arc_distance_mm=1.8, grip_count=3)
 
         # Should return only top arcs, not bottom arc
         assert edges is not None
@@ -543,10 +550,50 @@ class TestFilterByCurvePoints:
         reference_sketch = make_reference_sketch()
         reference_point = make_point(0.0, 0.0, 0.0)
 
-        edges = getGripRidgeChamferEdges(extrude, target_body, reference_sketch, reference_point, nominal_dia_mm=3.0)
+        edges = getGripRidgeChamferEdges(
+            extrude, target_body, reference_sketch, reference_point,
+            grip_ridge_dia_mm=1.5, grip_arc_distance_mm=1.8, grip_count=3)
 
         # Should return None if fewer than 3 matching arcs found
         assert edges is None
+
+    def test_getGripRidgeChamferEdges_ignores_another_holes_ridges(self):
+        """Ridges belonging to a second hole must not be chamfered as this one's.
+
+        Every grip-ridge hole in the body has arcs of the same radius in the same
+        plane, so radius alone cannot tell them apart - only distance from THIS
+        hole's centre can.
+        """
+        grip_radius = 0.075       # cm, from grip_ridge_dia_mm=1.5
+        arc_distance = 0.18       # cm, from grip_arc_distance_mm=1.8
+
+        def ridge(x, y):
+            return FakeEdge(
+                curveType='Arc3DCurveType',
+                geometry=SimpleNamespace(
+                    curveType='Arc3DCurveType',
+                    center=make_point(x, y, 0.0),
+                    normal=make_point(0.0, 0.0, 1.0),
+                    radius=grip_radius))
+
+        # This hole's 3 ridges, centred on the origin
+        mine = [ridge(arc_distance, 0.0), ridge(-0.09, 0.156), ridge(-0.09, -0.156)]
+        # A second, identical hole 2 cm away - same radius, same plane
+        other_x = 2.0
+        theirs = [ridge(other_x + arc_distance, 0.0),
+                  ridge(other_x - 0.09, 0.156),
+                  ridge(other_x - 0.09, -0.156)]
+
+        target_body = MagicMock()
+        target_body.edges = theirs + mine
+
+        edges = getGripRidgeChamferEdges(
+            MagicMock(), target_body, make_reference_sketch(), make_point(0.0, 0.0, 0.0),
+            grip_ridge_dia_mm=1.5, grip_arc_distance_mm=1.8, grip_count=3)
+
+        assert edges is not None
+        assert edges.count == 3
+        assert set(edges._items) == set(mine)
 
     def test_addAngleChamferToEdge_sets_distance_and_angle(self, monkeypatch):
         edge = FakeEdge(curveType='Circle3DCurveType', length=2.0)
@@ -684,132 +731,6 @@ class TestFilterByCurvePoints:
         assert result[0][0] == profile
 
 
-class TestFilterByBoundingBox:
-    """Test _filter_by_bounding_box function."""
-
-    def test_bbox_within_circle_bounds(self):
-        """Bbox entirely within circle bounds should be included."""
-        circle_center = make_point(0.0, 0.0, 0.0)
-        circle_radius = 10.0
-
-        # Margin: circle_radius * 1.0 = 10.0
-        # Bounds: [center ± 2*radius] = [-20, 20]
-        profile = make_profile(
-            area=10.0,
-            bbox_min_x=-5.0, bbox_min_y=-5.0,
-            bbox_max_x=5.0, bbox_max_y=5.0
-        )
-        candidates = [(profile, 10.0, 1.0)]
-
-        result = _filter_by_bounding_box(candidates, circle_center, circle_radius)
-
-        assert len(result) == 1
-
-    def test_bbox_outside_left_boundary(self):
-        """Bbox extending past left boundary should be excluded."""
-        circle_center = make_point(0.0, 0.0, 0.0)
-        circle_radius = 10.0
-
-        # Min bound: center.x - 2*radius = -20.0
-        profile = make_profile(
-            area=10.0,
-            bbox_min_x=-21.0, bbox_min_y=-5.0,
-            bbox_max_x=5.0, bbox_max_y=5.0
-        )
-        candidates = [(profile, 10.0, 1.0)]
-
-        result = _filter_by_bounding_box(candidates, circle_center, circle_radius)
-
-        assert len(result) == 0
-
-    def test_bbox_outside_right_boundary(self):
-        """Bbox extending past right boundary should be excluded."""
-        circle_center = make_point(0.0, 0.0, 0.0)
-        circle_radius = 10.0
-
-        # Max bound: center.x + 2*radius = 20.0
-        profile = make_profile(
-            area=10.0,
-            bbox_min_x=-5.0, bbox_min_y=-5.0,
-            bbox_max_x=21.0, bbox_max_y=5.0
-        )
-        candidates = [(profile, 10.0, 1.0)]
-
-        result = _filter_by_bounding_box(candidates, circle_center, circle_radius)
-
-        assert len(result) == 0
-
-    def test_bbox_outside_top_boundary(self):
-        """Bbox extending past top boundary should be excluded."""
-        circle_center = make_point(0.0, 0.0, 0.0)
-        circle_radius = 10.0
-
-        profile = make_profile(
-            area=10.0,
-            bbox_min_x=-5.0, bbox_min_y=-5.0,
-            bbox_max_x=5.0, bbox_max_y=21.0
-        )
-        candidates = [(profile, 10.0, 1.0)]
-
-        result = _filter_by_bounding_box(candidates, circle_center, circle_radius)
-
-        assert len(result) == 0
-
-
-class TestAccumulateProfiles:
-    """Test _accumulate_profiles function."""
-
-    def test_bbox_outside_left_boundary(self):
-        """Bbox extending past left boundary should be excluded."""
-        circle_center = make_point(0.0, 0.0, 0.0)
-        circle_radius = 10.0
-
-        # Min bound: center.x - 2*radius = -20.0
-        profile = make_profile(
-            area=10.0,
-            bbox_min_x=-21.0, bbox_min_y=-5.0,
-            bbox_max_x=5.0, bbox_max_y=5.0
-        )
-        candidates = [(profile, 10.0, 1.0)]
-
-        result = _filter_by_bounding_box(candidates, circle_center, circle_radius)
-
-        assert len(result) == 0
-
-    def test_bbox_outside_right_boundary(self):
-        """Bbox extending past right boundary should be excluded."""
-        circle_center = make_point(0.0, 0.0, 0.0)
-        circle_radius = 10.0
-
-        # Max bound: center.x + 2*radius = 20.0
-        profile = make_profile(
-            area=10.0,
-            bbox_min_x=-5.0, bbox_min_y=-5.0,
-            bbox_max_x=21.0, bbox_max_y=5.0
-        )
-        candidates = [(profile, 10.0, 1.0)]
-
-        result = _filter_by_bounding_box(candidates, circle_center, circle_radius)
-
-        assert len(result) == 0
-
-    def test_bbox_outside_top_boundary(self):
-        """Bbox extending past top boundary should be excluded."""
-        circle_center = make_point(0.0, 0.0, 0.0)
-        circle_radius = 10.0
-
-        profile = make_profile(
-            area=10.0,
-            bbox_min_x=-5.0, bbox_min_y=-5.0,
-            bbox_max_x=5.0, bbox_max_y=21.0
-        )
-        candidates = [(profile, 10.0, 1.0)]
-
-        result = _filter_by_bounding_box(candidates, circle_center, circle_radius)
-
-        assert len(result) == 0
-
-
 class TestAccumulateProfiles:
     """Test _accumulate_profiles function."""
 
@@ -912,3 +833,23 @@ class TestAccumulateProfiles:
         assert len(profiles) == 2
         assert profile2 in profiles
         assert profile3 in profiles
+
+
+class TestAccumulateProfilesBounds:
+    """The combinatorial search must stay bounded on a busy sketch."""
+
+    def test_many_candidates_does_not_explode(self):
+        """combinations() over an uncapped list is factorial - the list is capped.
+
+        No single profile is close to the target here, so the search has to go
+        deep. Over all 60 candidates that is C(60, 11) combinations and would
+        never return; capped at 15 it is a few thousand.
+        """
+        target_area = 10.0
+        candidates = [(make_profile(area=0.9), 0.9, 1.0) for _ in range(60)]
+
+        profiles, difference = _accumulate_profiles(candidates, target_area)
+
+        # Best reachable sum is 11 x 0.9 = 9.9
+        assert len(profiles) == 11
+        assert difference == pytest.approx(0.1, abs=1e-9)

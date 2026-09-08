@@ -37,14 +37,7 @@ if not exist "%TARGET%\" (
 
 :: ── Copy Python modules and manifests ────────────────────────────────────────
 call :CopyFile "ThreadMeister.py"
-call :CopyFileInDir "core" "tm_state.py"
-call :CopyFileInDir "core" "tm_config.py"
-call :CopyFileInDir "core" "tm_helpers.py"
-call :CopyFileInDir "core" "tm_geometry.py"
-call :CopyFileInDir "core" "tm_execute.py"
-call :CopyFileInDir "core" "tm_ui.py"
-call :CopyFileInDir "core" "tm_debug_export.py"
-call :CopyFileInDir "core" "__init__.py"
+call :CopyCore
 call :CopyFile "ThreadMeister.manifest"
 call :CopyFile "manifest.json"
 call :CopyFile "License.txt"
@@ -100,17 +93,15 @@ if %DRYRUN%==0 xcopy /y /q "%SOURCE%%~1" "%TARGET%\" >nul
 echo   Copied   %~1
 goto :eof
 
-:: ── Helper: copy a file from a subdirectory ─────────────────────────────────────
-:CopyFileInDir
-set "SUBDIR=%~1"
-set "FILENAME=%~2"
-if not exist "%SOURCE%%SUBDIR%\%FILENAME%" (
-    echo   MISSING  %SUBDIR%\%FILENAME%
+:: ── Helper: copy every module in core\ ──────────────────────────
+:CopyCore
+if not exist "%SOURCE%core\" (
+    echo   MISSING  core
     goto :eof
 )
-if not exist "%TARGET%\%SUBDIR%\" (
-    if %DRYRUN%==0 mkdir "%TARGET%\%SUBDIR%"
+if %DRYRUN%==0 (
+    if not exist "%TARGET%\core\" mkdir "%TARGET%\core"
+    xcopy /y /q "%SOURCE%core\*.py" "%TARGET%\core\" >nul
 )
-if %DRYRUN%==0 xcopy /y /q "%SOURCE%%SUBDIR%\%FILENAME%" "%TARGET%\%SUBDIR%\" >nul
-echo   Copied   %SUBDIR%\%FILENAME%
+echo   Copied   core\*.py
 goto :eof

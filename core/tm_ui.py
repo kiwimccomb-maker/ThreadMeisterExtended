@@ -25,15 +25,16 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
 
             onExecute = CommandExecuteHandler()
             cmd.execute.add(onExecute)
-            tm_state._handlers.append(onExecute)
 
             onInputChanged = InputChangedHandler()
             cmd.inputChanged.add(onInputChanged)
-            tm_state._handlers.append(onInputChanged)
 
             onValidateInputs = ValidateInputsHandler()
             cmd.validateInputs.add(onValidateInputs)
-            tm_state._handlers.append(onValidateInputs)
+
+            # Held on self (which tm_state._handlers keeps alive) rather than
+            # appended to that list, which grew on every dialog open.
+            self._cmdHandlers = [onExecute, onInputChanged, onValidateInputs]
 
             inputs = cmd.commandInputs
 
@@ -75,6 +76,7 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
 
             if not foundLastSelected and insertList.count > 0:
                 insertList.item(0).isSelected = True
+                lastSelected = insertList.item(0).name
 
             # Hole type
             holeTypeGroup = inputs.addRadioButtonGroupCommandInput('holeType', 'Hole Type')
@@ -89,7 +91,8 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
                 lastSelected, (0, 7.0, 0, 0, 0, 3))
             isGripDefault = lastSelected in tm_state.GRIP_RIDGE_INSERTS
             inputs.addFloatSpinnerCommandInput(
-                'gripEdgeDepth', 'Hole Depth (mm)', 'mm', 0.1, 100.0, configHoleDepth / 10.0, 1)
+                'gripEdgeDepth', 'Hole Depth', 'mm',
+                0.01, 100.0, 0.1, configHoleDepth / 10.0)
             depthInput = inputs.itemById('gripEdgeDepth')
             depthInput.isVisible = isGripDefault
 
@@ -101,13 +104,16 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
 
             # Bottom radius option
             inputs.addBoolValueInput('addBottomRadius',
-                                     f'Add Bottom Fillet ({tm_state.CONFIG["bottom_radius_size"]}mm)',
+                                     'Add Bottom Fillet',
                                      True, '',
                                      tm_state.CONFIG['bottom_radius_enabled_default'])
 
             # Info text
             inputs.addTextBoxCommandInput('infoText', '', '', 5, True)
-            updateInfoText(inputs)
+
+            # Settings: edit the config.ini design parameters without leaving
+            # Fusion. Collapsed by default; applied to this run and saved on OK.
+            _addSettingsGroup(inputs)
 
             # Developer: debug export (only visible when enabled in config.ini)
             if tm_state.CONFIG.get('enable_debug_export', False):
@@ -115,6 +121,9 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
                                          'Export Debug JSON (saves fixture to debug_exports/)',
                                          True, '',
                                          False)
+
+            # Last, so the info text reflects the Settings group's values
+            updateInfoText(inputs)
 
         except Exception:
             tm_state._ui.messageBox('Failed:\n{}'.format(traceback.format_exc()))
@@ -146,7 +155,8 @@ class InputChangedHandler(adsk.core.InputChangedEventHandler):
                         _, configHoleDepth, _, _, _, _ = tm_state.GRIP_RIDGE_INSERTS[insertName]
                         depthInput.value = configHoleDepth / 10.0
 
-            if changedInput.id in ('insertSize', 'holeType', 'addChamfer', 'gripEdgeDepth'):
+            if changedInput.id in ('insertSize', 'holeType', 'addChamfer', 'gripEdgeDepth',
+                                   'setChamferSize', 'setExtraDepth', 'setGripChamferAngle'):
                 updateInfoText(inputs)
 
         except Exception:
@@ -169,6 +179,41 @@ class ValidateInputsHandler(adsk.core.ValidateInputsEventHandler):
             tm_state._ui.messageBox('Failed:\n{}'.format(traceback.format_exc()))
 
 
+def _addSettingsGroup(inputs):
+    """Add the collapsed Settings group that edits config.ini design parameters.
+
+    These spinners are unitless on purpose: `.value` is the number shown, in mm
+    or degrees, with no Fusion-internal cm/radian conversion to get wrong. The
+    grip depth spinner above is the exception and is declared in 'mm'.
+
+    Min/max mirror the validation in tm_config.load_config().
+    """
+    group = inputs.addGroupCommandInput('settingsGroup', 'Settings')
+    group.isExpanded = False
+    children = group.children
+
+    children.addFloatSpinnerCommandInput(
+        'setChamferSize', 'Chamfer Size (mm)', '',
+        0.1, 5.0, 0.1, tm_state.CONFIG['chamfer_size'])
+    children.addFloatSpinnerCommandInput(
+        'setExtraDepth', 'Blind Hole Extra Depth (mm)', '',
+        0.0, 10.0, 0.1, tm_state.CONFIG['blind_hole_extra_depth'])
+    children.addFloatSpinnerCommandInput(
+        'setBottomRadius', 'Bottom Fillet Radius (mm)', '',
+        0.0, 5.0, 0.1, tm_state.CONFIG['bottom_radius_size'])
+    children.addFloatSpinnerCommandInput(
+        'setGripChamferAngle', 'Grip Chamfer Angle (deg)', '',
+        15.0, 85.0, 1.0, tm_state.CONFIG['grip_chamfer_angle'])
+    children.addBoolValueInput(
+        'setShowMessage', 'Show Success Message', True, '',
+        tm_state.CONFIG.get('show_success_message', True))
+    children.addBoolValueInput(
+        'setEnableLogging', 'Enable Logging', True, '',
+        tm_state.CONFIG.get('enable_logging', False))
+
+    return group
+
+
 def updateInfoText(inputs):
     """Refresh the info text box with specs for the currently selected insert."""
     try:
@@ -179,7 +224,13 @@ def updateInfoText(inputs):
         insertName = insertSize.selectedItem.name
         isBlindHole = holeType.selectedItem.name == 'Blind Hole'
 
+        # Live values from the Settings group (CONFIG values until it is built)
+        settings = tm_config.read_settings_inputs(inputs)
+
         is_grip_ridge = insertName in tm_state.GRIP_RIDGE_INSERTS
+        if not is_grip_ridge and insertName not in tm_state.INSERT_SPECS:
+            infoText.formattedText = f'<b>{insertName}</b><br/>No specification found in config.ini.'
+            return
 
         if is_grip_ridge:
             (clearanceDia, holeDepth, gripChamferSize,
@@ -202,18 +253,19 @@ def updateInfoText(inputs):
         if is_grip_ridge:
             depthStr = f'{totalDepth:.1f} mm' if isBlindHole else 'Through body'
         elif isBlindHole:
-            extra = tm_state.CONFIG['blind_hole_extra_depth']
-            chamfer = tm_state.CONFIG['chamfer_size'] if chamferOn else 0.0
+            extra = settings['blind_hole_extra_depth']
+            chamferSize = settings['chamfer_size']
+            chamfer = chamferSize if chamferOn else 0.0
             holeDepth = calc_blind_hole_depth_mm(insertLen, extra, chamfer)
             if chamferOn:
-                depthStr = f'{holeDepth:.1f} mm ({insertLen} + {extra} + {tm_state.CONFIG["chamfer_size"]})'
+                depthStr = f'{holeDepth:.1f} mm ({insertLen} + {extra} + {chamferSize})'
             else:
                 depthStr = f'{holeDepth:.1f} mm ({insertLen} + {extra})'
         else:
             depthStr = 'Through body'
 
         if is_grip_ridge:
-            grip_chamfer_angle = tm_state.CONFIG.get('grip_chamfer_angle', 60)
+            grip_chamfer_angle = settings['grip_chamfer_angle']
             chamfer_info = f'{gripChamferSize}mm @ {grip_chamfer_angle}°' if chamferOn else 'Off'
             info = (f'<b>{insertName}</b><br/>' +
                     f'Hole: {holeDia:.1f} mm  ·  Depth: {totalDepth:.1f} mm<br/>' +

@@ -1,4 +1,6 @@
-# Development and Testing Dependencies
-pytest==7.4.3
-pytest-cov==4.1.0
-matplotlib==3.10.8
+# Development and testing dependencies.
+# The add-in itself has no runtime dependencies - Fusion 360 provides adsk.
+pytest>=7.4
+pytest-cov>=4.1
+# Only needed by the fixture/profile visualisers in scripts/
+matplotlib>=3.8

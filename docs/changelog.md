@@ -1,5 +1,85 @@
 # Changelog
 
+## Unreleased
+
+Added
+- **In-dialog Settings group**: chamfer size, blind hole extra depth, bottom
+  fillet radius, grip chamfer angle, success message and logging are editable
+  from the ThreadMeister dialog. Values apply to the holes being created and are
+  saved back to `config.ini` on OK; cancelling changes nothing
+- The info panel now recalculates live from those values instead of the last
+  loaded config
+- `save_values()` edits config.ini line by line rather than round-tripping
+  through configparser, which rebuilt the file and **dropped every comment in
+  it** - including the format hint above `[GripRidgeInserts]`. This also fixes
+  comment loss on the existing checkbox/last-insert saves
+- The bottom fillet checkbox no longer bakes the size into its label, which
+  would go stale as soon as the size was changed
+
+Correctness
+- **Grip-ridge depth on multi-point cuts**: the loop wrote the cm-converted depth
+  back over the mm spec value, so the 2nd and later points of one run were cut
+  10x too shallow
+- **Grip-ridge depth spinner**: the configured hole depth was passed as the
+  spinner's step size instead of its initial value, so the dialog opened showing
+  the wrong depth and cut it if the dropdown was never touched
+- **Grip-ridge chamfers went to the wrong hole**: candidate edges were matched on
+  arc radius and plane only, which every other grip hole in the body also
+  satisfies. They are now also matched on distance from that hole's centre
+- **Bottom-fillet preference was silently cleared**: the saved value was the one
+  already ANDed with "blind hole", so cutting a through hole turned the setting off
+- **Chamfer edge matching**: perpendicular distance was computed as
+  `length - |projection|`, which under-reports badly for edges far along the
+  axis; now `sqrt(length^2 - projection^2)`
+- **Profile accumulation could hang Fusion**: `combinations()` ran over the full
+  candidate list (only the subset size was capped), which is factorial. The
+  candidate list itself is now capped at 15
+- Re-running the add-in after a failed stop no longer throws on a duplicate
+  command definition
+- Timeline grouping no longer skipped for the first feature in an empty design
+- Info text falls back to a message instead of raising when the remembered
+  insert is missing from config.ini
+- Grip-ridge chamfer failures log instead of raising a dialog per point
+
+Consistency
+- Version is 1.3.2 in `manifest.json`, `ThreadMeister.manifest` and the module
+  docstring (all still said 1.2.2)
+- `ThreadMeister.manifest` pointed at a `ThreadMeister.svg` that is not in the repo
+- Insert names in `config.ini` now match the README, help file and code defaults
+  (they were lowercase, so the remembered selection never matched)
+- Fallback grip-ridge defaults and `grip_chamfer_angle` matched neither
+  `config.ini` nor the README; there is now one set of defaults, in `tm_config`
+
+Cleanup
+- Removed dead code: `M_SERIES_DATA`, `clear_log()`, `isSamePoint()`,
+  `isSameCircle()`, `calc_blind_hole_depth()`, `_filter_by_bounding_box()`
+- `_filter_by_area` passes the centroid through instead of `_filter_by_centroid`
+  calling the expensive `areaProperties()` a second time on every profile
+- Through-hole search is bounded by the body's bounding box instead of always
+  stepping 1000 times
+- Per-dialog event handlers no longer accumulate in `tm_state._handlers` on
+  every dialog open
+- `deploy.bat` / `package.bat` copy `core\*.py` instead of listing each module
+- Deleted `requirements.txt` (a pip freeze of an unrelated conda env, with
+  unresolvable `file:///` paths); dev dependencies live in `requirements-dev.txt`
+- Two test classes shared the name `TestAccumulateProfiles`, so the first one's
+  tests never ran; the grip-ridge chamfer tests were calling a signature that no
+  longer existed
+
+## 1.3.2 - Grip ridge chamfer parameters
+- Grip ridge chamfer parameters reworked: `grip_edge_chamfer` values increased
+  and `grip_chamfer_angle` raised to 78 degrees, since chamfers applied through
+  the grip ridge parameters do not behave like manually added chamfers
+- Fixed the default hole depth used for grip ridge inserts
+
+## 1.3.1 - Bug fixes and improvements
+
+## 1.3.0 - Advanced parameters and customization
+- Advanced per-size parameters for grip ridge inserts: clearance diameter, hole
+  depth, grip edge chamfer, grip ridge diameter, grip arc distance and grip count
+- `config.ini` gained the `[GripRidgeInserts]` section carrying all six values
+- Tests covering the new configuration options
+
 ## 1.2.2 — 2026-03-16 — Config restructure & depth fix
 - **Config.ini reorganized** into 4 sections: `[Settings]`, `[Inserts]`, `[UI State]`, `[Developer]`
 - Auto-migration: old single-section configs are upgraded automatically on load

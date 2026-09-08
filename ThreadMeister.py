@@ -10,11 +10,12 @@ using the dimensional specifications from CNC Kitchen.
 Author: Andreas Kircher (Andreas.O.Kircher@gmail.com)
 Created with assistance from: Claude (Anthropic) / Perplexity
 Insert specifications from: CNC Kitchen (cnckitchen.com)
-Version: 1.2.2
+Version: 1.3.2
 
 Features:
 - Creates heat-set insert holes at sketch points
 - Hole creation with CNC Kitchen specifications (M2-M10, 1/4"-20) – customizable via config.ini
+- Grip-ridge insert holes (M1.6-M10) with configurable arc ridges
 - Blind holes and through holes
 - Automatic chamfer for easier insert installation
 - Automatic bottom radius for blind holes
@@ -61,6 +62,12 @@ def run(context):
         addon_path = os.path.dirname(os.path.realpath(__file__))
         resources_path = os.path.join(addon_path, 'resources', 'icons')
 
+        # A previous run that failed to stop cleanly leaves these behind, and
+        # re-adding an existing id throws.
+        existingDef = cmdDefs.itemById(tm_state.CMD_ID)
+        if existingDef:
+            existingDef.deleteMe()
+
         buttonDef = cmdDefs.addButtonDefinition(
             tm_state.CMD_ID,
             tm_state.CMD_NAME,
@@ -74,6 +81,9 @@ def run(context):
 
         panel = tm_state._ui.allToolbarPanels.itemById(tm_state.PANEL_ID)
         if panel:
+            existingControl = panel.controls.itemById(tm_state.CMD_ID)
+            if existingControl:
+                existingControl.deleteMe()
             buttonControl = panel.controls.addCommand(buttonDef)
             buttonControl.isPromoted = True
             buttonControl.isPromotedByDefault = True
@@ -96,5 +106,7 @@ def stop(context):
             control = panel.controls.itemById(tm_state.CMD_ID)
             if control:
                 control.deleteMe()
+
+        tm_state._handlers.clear()
     except Exception:
         tm_state._ui.messageBox('Failed to stop add-in:\n{}'.format(traceback.format_exc()))

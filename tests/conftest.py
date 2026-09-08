@@ -17,6 +17,7 @@ adsk_mock.core.SurfaceTypes = MagicMock()
 adsk_mock.core.SurfaceTypes.PlaneSurfaceType = 'PlaneSurfaceType'
 adsk_mock.core.Curve3DTypes = MagicMock()
 adsk_mock.core.Curve3DTypes.Circle3DCurveType = 'Circle3DCurveType'
+adsk_mock.core.Curve3DTypes.Arc3DCurveType = 'Arc3DCurveType'
 
 # Mock ObjectCollection to be iterable and countable
 def create_object_collection():
@@ -44,6 +45,14 @@ def create_object_collection():
     return MockObjectCollection()
 
 adsk_mock.core.ObjectCollection.create = create_object_collection
+
+# Handler classes subclass these, so they must be real classes, not MagicMocks
+class _FakeEventHandler:
+    pass
+
+for _handler_name in ('CommandEventHandler', 'CommandCreatedEventHandler',
+                      'InputChangedEventHandler', 'ValidateInputsEventHandler'):
+    setattr(adsk_mock.core, _handler_name, _FakeEventHandler)
 
 sys.modules['adsk'] = adsk_mock
 sys.modules['adsk.core'] = adsk_mock.core

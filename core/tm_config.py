@@ -10,6 +10,7 @@ Config sections:
   [UI State]         - Remembered menu state (chamfer_enabled_default, bottom_radius_enabled_default, etc.)
   [Developer]        - Debug flags (enable_logging, enable_debug_export)
 """
+import io
 import os
 import configparser
 import tm_helpers
@@ -106,10 +107,10 @@ def load_config(config_file=None):
             config, 'enable_debug_export', 'Developer', False, 'boolean')
 
         # --- Grip-ridge chamfer angle ---
-        grip_chamfer_angle = _get(config, 'grip_chamfer_angle', 'Settings', 60, 'float')
+        grip_chamfer_angle = _get(config, 'grip_chamfer_angle', 'Settings', 78, 'float')
         if grip_chamfer_angle < 15 or grip_chamfer_angle > 85:
-            warnings.append(f'Grip chamfer angle {grip_chamfer_angle}° is unusual (expected 15-85°). Using default 60°.')
-            grip_chamfer_angle = 60
+            warnings.append(f'Grip chamfer angle {grip_chamfer_angle}° is unusual (expected 15-85°). Using default 78°.')
+            grip_chamfer_angle = 78
         tm_state.CONFIG['grip_chamfer_angle'] = grip_chamfer_angle
 
         # --- [Inserts] ---
@@ -261,7 +262,7 @@ def _write_config_file(config_file=None):
     config.set('Settings', 'chamfer_size', str(tm_state.CONFIG.get('chamfer_size', 0.5)))
     config.set('Settings', 'blind_hole_extra_depth', str(tm_state.CONFIG.get('blind_hole_extra_depth', 1.0)))
     config.set('Settings', 'bottom_radius_size', str(tm_state.CONFIG.get('bottom_radius_size', 0.5)))
-    config.set('Settings', 'grip_chamfer_angle', str(tm_state.CONFIG.get('grip_chamfer_angle', 60)))
+    config.set('Settings', 'grip_chamfer_angle', str(tm_state.CONFIG.get('grip_chamfer_angle', 78)))
 
     # [Inserts]
     config.add_section('Inserts')
@@ -293,39 +294,130 @@ def _write_config_file(config_file=None):
         config.write(f)
 
 
-def save_last_selected_insert(insert_name, config_file=None):
-    """Persist the last selected insert name to config.ini."""
+def _is_section_header(line):
+    """True if a config.ini line is a [Section] header."""
+    stripped = line.strip()
+    return stripped.startswith('[') and stripped.endswith(']')
+
+
+def save_values(updates, config_file=None):
+    """Merge {section: {key: value}} into config.ini, rewriting only those lines.
+
+    Deliberately not a configparser round-trip: that rebuilds the whole file and
+    drops every comment in it, including the format hint above [GripRidgeInserts].
+    Editing the matching lines in place keeps comments, ordering and spacing, and
+    leaves the insert tables alone.
+
+    Old-format files have no [UI State] and keep those keys in [Settings].
+
+    Returns:
+        True if the file was written.
+    """
     try:
         if config_file is None:
             config_file = _get_config_path()
-        config = _read_config_file(config_file)
-        section = 'UI State' if config.has_section('UI State') else 'Settings'
-        if not config.has_section(section):
-            config.add_section(section)
-        config.set(section, 'last_selected_insert', insert_name)
-        with open(config_file, 'w', encoding='utf-8') as f:
-            config.write(f)
+
+        try:
+            with io.open(config_file, 'r', encoding='utf-8') as f:
+                lines = f.read().split('\n')
+        except OSError:
+            lines = []
+
+        sections_present = {line.strip()[1:-1] for line in lines if _is_section_header(line)}
+
+        pending = {}
+        for section, values in updates.items():
+            if section == 'UI State' and 'UI State' not in sections_present:
+                section = 'Settings'
+            pending.setdefault(section, {}).update(values)
+
+        # Pass 1: overwrite the keys that are already in the file
+        out = []
+        section = None
+        for line in lines:
+            stripped = line.strip()
+            if _is_section_header(line):
+                section = stripped[1:-1]
+            elif (section in pending and '=' in stripped
+                    and not stripped.startswith(('#', ';'))):
+                key = stripped.split('=', 1)[0].strip()
+                if key in pending[section]:
+                    line = f'{key} = {pending[section].pop(key)}'
+            out.append(line)
+
+        # Pass 2: add the keys that were not there, under their own section
+        for section, leftovers in pending.items():
+            if not leftovers:
+                continue
+            new_lines = [f'{key} = {value}' for key, value in leftovers.items()]
+            header = next((i for i, line in enumerate(out)
+                           if _is_section_header(line) and line.strip()[1:-1] == section), None)
+            if header is None:
+                if out and out[-1].strip():
+                    out.append('')
+                out.append(f'[{section}]')
+                out.extend(new_lines)
+                out.append('')
+            else:
+                out[header + 1:header + 1] = new_lines
+
+        with io.open(config_file, 'w', encoding='utf-8', newline='\n') as f:
+            f.write('\n'.join(out))
+        return True
     except Exception as e:
-        tm_helpers.log(f'Failed to save last selected insert: {e}')
+        tm_helpers.log(f'Failed to save config values: {e}')
+        return False
+
+
+def save_last_selected_insert(insert_name, config_file=None):
+    """Persist the last selected insert name to config.ini."""
+    return save_values({'UI State': {'last_selected_insert': insert_name}}, config_file)
 
 
 def save_checkbox_states(chamfer_state, radius_state, show_message_state, is_blind_hole, config_file=None):
     """Persist UI checkbox states and hole type to config.ini."""
-    try:
-        if config_file is None:
-            config_file = _get_config_path()
-        config = _read_config_file(config_file)
-        section = 'UI State' if config.has_section('UI State') else 'Settings'
-        if not config.has_section(section):
-            config.add_section(section)
-        config.set(section, 'chamfer_enabled_default', str(chamfer_state))
-        config.set(section, 'bottom_radius_enabled_default', str(radius_state))
-        config.set(section, 'show_success_message', str(show_message_state))
-        config.set(section, 'hole_type_blind', str(is_blind_hole))
-        with open(config_file, 'w', encoding='utf-8') as f:
-            config.write(f)
-    except Exception as e:
-        tm_helpers.log(f'Failed to save checkbox states: {e}')
+    return save_values({'UI State': {
+        'chamfer_enabled_default': chamfer_state,
+        'bottom_radius_enabled_default': radius_state,
+        'show_success_message': show_message_state,
+        'hole_type_blind': is_blind_hole,
+    }}, config_file)
+
+
+# Design parameters the dialog's Settings group can edit, in dialog order:
+#   command input id -> (CONFIG key, config.ini section)
+# The spinner ranges in tm_ui match the validation in load_config(), so a value
+# entered here can never be one the next load would reject.
+SETTINGS_INPUTS = {
+    'setChamferSize': ('chamfer_size', 'Settings'),
+    'setExtraDepth': ('blind_hole_extra_depth', 'Settings'),
+    'setBottomRadius': ('bottom_radius_size', 'Settings'),
+    'setGripChamferAngle': ('grip_chamfer_angle', 'Settings'),
+    'setShowMessage': ('show_success_message', 'UI State'),
+    'setEnableLogging': ('enable_logging', 'Developer'),
+}
+
+
+def read_settings_inputs(inputs):
+    """Read the Settings group back as {CONFIG key: value}.
+
+    An input that is not there yet (the group is built last) falls back to the
+    loaded CONFIG value, so callers get a complete dict either way.
+    """
+    values = {}
+    for input_id, (key, _section) in SETTINGS_INPUTS.items():
+        command_input = inputs.itemById(input_id)
+        values[key] = command_input.value if command_input else tm_state.CONFIG.get(key)
+    return values
+
+
+def save_settings(values, config_file=None):
+    """Persist {CONFIG key: value} from the Settings group to its config sections."""
+    updates = {}
+    for _input_id, (key, section) in SETTINGS_INPUTS.items():
+        if key in values:
+            updates.setdefault(section, {})[key] = values[key]
+    return save_values(updates, config_file)
 
 
 def get_default_inserts():
@@ -354,50 +446,28 @@ def get_default_grip_ridge_inserts():
             grip_ridge_dia, grip_arc_distance, grip_count)
     """
     return {
-        'M1.6 Grip':  (1.8, 4,  0.12, 0.8,  1.075, 3),
-        'M2 Grip':    (2.2, 5,  0.14, 1.0,  1.35,  3),
-        'M2.5 Grip':  (2.7, 6,  0.14, 1.25, 1.725, 3),
-        'M3 Grip':    (3.2, 7,  0.19, 1.5,  2.05,  3),
-        'M4 Grip':    (4.2, 8,  0.22, 2.0,  2.75,  3),
-        'M5 Grip':    (5.3, 9,  0.23, 2.5,  3.5,   4),
-        'M6 Grip':    (6.3, 10, 0.24, 2.7,  3.5,   5),
-        'M8 Grip':    (8.3, 12, 0.35, 3.5,  5.3,   5),
-        'M10 Grip':   (10.3, 14, 0.4, 4.0,  6.45,  6),
+        'M1.6 Grip':  (1.8,  4,  0.2,  0.8,  1.075, 3),
+        'M2 Grip':    (2.2,  5,  0.23, 1.0,  1.35,  3),
+        'M2.5 Grip':  (2.7,  6,  0.23, 1.25, 1.725, 3),
+        'M3 Grip':    (3.2,  7,  0.28, 1.5,  2.05,  3),
+        'M4 Grip':    (4.2,  8,  0.33, 2.0,  2.75,  3),
+        'M5 Grip':    (5.3,  9,  0.37, 2.5,  3.5,   4),
+        'M6 Grip':    (6.3,  10, 0.42, 2.7,  4.0,   5),
+        'M8 Grip':    (8.3,  12, 0.5,  3.5,  5.3,   5),
+        'M10 Grip':   (10.3, 14, 0.6,  4.0,  6.45,  6),
     }
 
 
 def create_default_config(config_file=None):
     """Write a default config.ini file in the new multi-section format."""
-    if config_file is None:
-        config_file = _get_config_path()
     try:
-        with open(config_file, 'w', encoding='utf-8') as f:
-            f.write('[Settings]\n')
-            f.write('chamfer_size = 0.5\n')
-            f.write('blind_hole_extra_depth = 1.0\n')
-            f.write('bottom_radius_size = 0.5\n')
-            f.write('grip_chamfer_angle = 60\n')
-            f.write('\n')
-            f.write('[Inserts]\n')
-            for name, (dia, length, wall) in get_default_inserts().items():
-                f.write(f'{name} = {dia}, {length}, {wall}\n')
-            f.write('\n')
-            f.write('[GripRidgeInserts]\n')
-            for name, (clearance_dia, hole_depth, grip_edge_chamfer,
-                       grip_ridge_dia, grip_arc_distance, grip_count) in get_default_grip_ridge_inserts().items():
-                f.write(f'{name} = {clearance_dia}, {hole_depth}, {grip_edge_chamfer}, '
-                        f'{grip_ridge_dia}, {grip_arc_distance}, {grip_count}\n')
-            f.write('\n')
-            f.write('[UI State]\n')
-            f.write('chamfer_enabled_default = True\n')
-            f.write('bottom_radius_enabled_default = False\n')
-            f.write('show_success_message = True\n')
-            f.write('hole_type_blind = True\n')
-            f.write('last_selected_insert = M3 x 5.7mm (standard)\n')
-            f.write('\n')
-            f.write('[Developer]\n')
-            f.write('enable_logging = False\n')
-            f.write('enable_debug_export = False\n')
+        # Start from the defaults only - anything already loaded would leak into
+        # the file we are about to call "default".
+        tm_state.INSERT_SPECS.clear()
+        tm_state.INSERT_SPECS.update(get_default_inserts())
+        tm_state.GRIP_RIDGE_INSERTS.clear()
+        tm_state.GRIP_RIDGE_INSERTS.update(get_default_grip_ridge_inserts())
+        _write_config_file(config_file)
     except Exception as e:
         if tm_state._ui:
             tm_state._ui.messageBox(f'Could not create config.ini: {str(e)}')

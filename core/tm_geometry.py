@@ -17,14 +17,14 @@ def _filter_by_area(sketch, target_area):
     Coarse area filter: select profiles whose area <= target_area * 1.01.
 
     Returns:
-        List of (profile, area) tuples passing the area filter.
+        List of (profile, area, centroid) tuples passing the area filter.
     """
     candidates = []
     threshold = target_area * 1.01
-    for idx, prof in enumerate(sketch.profiles):
+    for prof in sketch.profiles:
         props = prof.areaProperties(adsk.fusion.CalculationAccuracy.MediumCalculationAccuracy)
         if props.area <= threshold:
-            candidates.append((prof, props.area))
+            candidates.append((prof, props.area, props.centroid))
     return candidates
 
 
@@ -33,7 +33,7 @@ def _filter_by_centroid(candidates, circle_center3d, circle_radius):
     Coarse centroid filter: check if profile centroid is inside target circle.
 
     Args:
-        candidates: List of (profile, area) tuples from area filter
+        candidates: List of (profile, area, centroid) tuples from area filter
         circle_center3d: 3D center point of target circle
         circle_radius: Radius of target circle
 
@@ -41,11 +41,8 @@ def _filter_by_centroid(candidates, circle_center3d, circle_radius):
         List of (profile, area, centroid_distance) tuples passing centroid filter.
     """
     filtered = []
-    for idx, (prof, area) in enumerate(candidates):
-        props = prof.areaProperties(adsk.fusion.CalculationAccuracy.MediumCalculationAccuracy)
-        centroid3d = props.centroid
+    for prof, area, centroid3d in candidates:
         distance = circle_center3d.distanceTo(centroid3d)
-
         if distance <= circle_radius:
             filtered.append((prof, area, distance))
 
@@ -139,39 +136,6 @@ def _filter_by_curve_points(candidates, circle_center3d, circle_radius):
     return filtered
 
 
-def _filter_by_bounding_box(candidates, circle_center3d, circle_radius):
-    """
-    Coarse bounding box filter: check if profile bbox fits in generous circle area.
-
-    Args:
-        candidates: List of (profile, area, distance) tuples from centroid filter
-        circle_center3d: 3D center point of target circle
-        circle_radius: Radius of target circle
-
-    Returns:
-        List of (profile, area, distance) tuples passing bbox filter.
-    """
-    bbox_margin = circle_radius * 0.1
-    circle_bbox_min_x = circle_center3d.x - circle_radius - bbox_margin
-    circle_bbox_max_x = circle_center3d.x + circle_radius + bbox_margin
-    circle_bbox_min_y = circle_center3d.y - circle_radius - bbox_margin
-    circle_bbox_max_y = circle_center3d.y + circle_radius + bbox_margin
-
-    filtered = []
-    for prof, area, distance in candidates:
-        prof_bbox = prof.boundingBox
-        is_contained = (
-            prof_bbox.minPoint.x >= circle_bbox_min_x and
-            prof_bbox.maxPoint.x <= circle_bbox_max_x and
-            prof_bbox.minPoint.y >= circle_bbox_min_y and
-            prof_bbox.maxPoint.y <= circle_bbox_max_y
-        )
-
-        if is_contained:
-            filtered.append((prof, area, distance))
-    return filtered
-
-
 def _accumulate_profiles(candidates, target_area):
     """
     Precise area matching: find profile combination with area closest to target.
@@ -184,13 +148,15 @@ def _accumulate_profiles(candidates, target_area):
     Returns:
         (best_profiles, best_difference) tuple, or (None, inf) if no match.
     """
-    candidates.sort(key=lambda x: x[1], reverse=True)
+    # Cap the candidate list itself: combinations() over an uncapped list grows
+    # factorially and would hang Fusion on a busy sketch. Largest areas first,
+    # since those are the ones that can sum to the target.
+    candidates = sorted(candidates, key=lambda x: x[1], reverse=True)[:15]
 
     best_profiles = None
     best_difference = float('inf')
-    max_profiles = min(len(candidates), 15)
 
-    for r in range(1, max_profiles + 1):
+    for r in range(1, len(candidates) + 1):
         for combo in combinations(candidates, r):
             combo_area = sum(item[1] for item in combo)
             difference = abs(combo_area - target_area)
@@ -382,7 +348,7 @@ def findChamferEdge(extrudeFeature, targetBody, sketch, circleCenter, holeDiamet
                     edgeCenter.z - center3D.z
                 )
                 projection = vecToEdge.x * zAxis.x + vecToEdge.y * zAxis.y + vecToEdge.z * zAxis.z
-                perpDist = vecToEdge.length - abs(projection)
+                perpDist = math.sqrt(max(0.0, vecToEdge.length ** 2 - projection ** 2))
                 if perpDist > 0.01:
                     continue
 
@@ -402,14 +368,15 @@ def findChamferEdge(extrudeFeature, targetBody, sketch, circleCenter, holeDiamet
         return None
 
 
-def getGripRidgeChamferEdges(extrudeFeature, targetBody, referenceSketch, referencePoint2d, grip_ridge_dia_mm, grip_count=3):
+def getGripRidgeChamferEdges(extrudeFeature, targetBody, referenceSketch, referencePoint2d,
+                             grip_ridge_dia_mm, grip_arc_distance_mm, grip_count=3):
     """
     Find the grip ridge arc edges at the hole entrance for chamfering.
 
-    After a cut extrude, the hole has arc edges at both the top and bottom.
-    The grip ridge arcs have a specific diameter from the GRIP_RIDGE_INSERTS spec.
-    This function finds ALL arcs on the body matching that radius, then
-    selects the ones at the top (sketch plane).
+    A cut extrude leaves arc edges at both the top and the bottom of the hole,
+    and every other grip-ridge hole in the body has arcs of the same radius.
+    Candidates must therefore match on all three counts: arc radius, distance
+    from THIS hole's centre, and lying in the sketch plane.
 
     Args:
         extrudeFeature: The extrude feature (unused, kept for API compatibility)
@@ -417,6 +384,7 @@ def getGripRidgeChamferEdges(extrudeFeature, targetBody, referenceSketch, refere
         referenceSketch: The temp sketch on the hole face.
         referencePoint2d: The projected sketch point geometry (2D, in sketch coords).
         grip_ridge_dia_mm: Diameter of grip ridge arc circles in mm.
+        grip_arc_distance_mm: Distance from hole centre to each arc centre in mm.
         grip_count: Expected number of grip ridges (default 3).
 
     Returns:
@@ -431,93 +399,73 @@ def getGripRidgeChamferEdges(extrudeFeature, targetBody, referenceSketch, refere
 
         (_origin, _xAxis, _yAxis, zAxis) = referenceSketch.transform.getAsCoordinateSystem()
 
-        # Expected grip ridge arc radius in cm (Fusion internal units).
+        # Expected geometry in cm (Fusion internal units).
         expected_grip_radius_cm = grip_ridge_dia_mm / 2.0 / 10.0
+        expected_arc_distance_cm = grip_arc_distance_mm / 10.0
 
         radius_tol = 0.005    # 0.05 mm in cm
         plane_tol = 0.005     # 0.05 mm in cm
+        # Radial tolerance scales with ridge size so small inserts stay selective.
+        radial_tol = max(0.01, expected_grip_radius_cm * 0.5)
 
-        # 2. Find ALL arc edges matching the grip ridge radius (top and bottom)
-        arc_count = 0
-        circle_count = 0
-        radius_match_top = []  # (edge, z_projection) at top
-        radius_match_bottom = []  # (edge, z_projection) at bottom
+        top_edges = []
+        rejected = 0
 
         for edge in targetBody.edges:
-            if edge.geometry.curveType == adsk.core.Curve3DTypes.Arc3DCurveType:
-                arc_count += 1
-            elif edge.geometry.curveType == adsk.core.Curve3DTypes.Circle3DCurveType:
-                circle_count += 1
-            else:
+            curveType = edge.geometry.curveType
+            if (curveType != adsk.core.Curve3DTypes.Arc3DCurveType and
+                    curveType != adsk.core.Curve3DTypes.Circle3DCurveType):
                 continue
 
             curve = edge.geometry
-            edge_center = curve.center
-            edge_normal = curve.normal
-            edge_radius = curve.radius
 
-            # Must be parallel to sketch plane
-            dot = abs(edge_normal.x * zAxis.x +
-                      edge_normal.y * zAxis.y +
-                      edge_normal.z * zAxis.z)
+            # Must match the grip ridge radius
+            if abs(curve.radius - expected_grip_radius_cm) > radius_tol:
+                continue
+
+            # Must be parallel to the sketch plane
+            normal = curve.normal
+            dot = abs(normal.x * zAxis.x + normal.y * zAxis.y + normal.z * zAxis.z)
             if dot < 0.99:
                 continue
 
-            # Get Z-offset from sketch plane
+            edge_center = curve.center
             vec = adsk.core.Vector3D.create(
                 edge_center.x - center3D.x,
                 edge_center.y - center3D.y,
                 edge_center.z - center3D.z)
-            projection = vec.x * zAxis.x + vec.y * zAxis.y + vec.z * zAxis.z
 
-            # Match radius against expected grip ridge radius
-            if abs(edge_radius - expected_grip_radius_cm) > radius_tol:
+            # Axial offset: only the arcs in the sketch plane are the top edges
+            projection = vec.x * zAxis.x + vec.y * zAxis.y + vec.z * zAxis.z
+            if abs(projection) > plane_tol:
+                rejected += 1
                 continue
 
-            # Categorize as top or bottom based on Z projection
-            if abs(projection) < plane_tol:
-                radius_match_top.append((edge, projection))
-            else:
-                radius_match_bottom.append((edge, projection))
+            # Radial offset: reject ridges belonging to a different hole
+            radial = math.sqrt(max(0.0, vec.length ** 2 - projection ** 2))
+            if abs(radial - expected_arc_distance_cm) > radial_tol:
+                rejected += 1
+                continue
 
-        # Diagnostic
-        top_radii = ', '.join('{:.6f}'.format(e.geometry.radius) for e, _ in radius_match_top)
-        bot_radii = ', '.join('{:.6f}'.format(e.geometry.radius) for e, _ in radius_match_bottom)
-        tm_helpers.log('GripRidgeChamfer diagnostics:')
-        tm_helpers.log('  Arc edges={}, Circle edges={}'.format(arc_count, circle_count))
-        tm_helpers.log('  Radius match (top={}): [{}]'.format(len(radius_match_top), top_radii))
-        tm_helpers.log('  Radius match (bot={}): [{}]'.format(len(radius_match_bottom), bot_radii))
-        tm_helpers.log('  Expected radius={} cm (grip_ridge_dia={} mm)'.format(
-            expected_grip_radius_cm, grip_ridge_dia_mm))
-        tm_helpers.log('  Expected grip_count={}'.format(grip_count))
+            top_edges.append(edge)
 
-        if len(radius_match_top) < grip_count:
-            if tm_state._ui:
-                tm_state._ui.messageBox(
-                    'Grip ridge chamfer: found {} top edges (need {}).\n'
-                    'Expected radius: {:.4f} cm\n'
-                    'Top edges: {}, Bottom edges: {}\n'
-                    'Arc={}, Circle={}'.format(
-                        len(radius_match_top), grip_count,
-                        expected_grip_radius_cm,
-                        len(radius_match_top), len(radius_match_bottom),
-                        arc_count, circle_count))
+        if len(top_edges) < grip_count:
+            # Non-fatal: the hole is already cut, only the chamfer is skipped.
+            tm_helpers.log(
+                'Grip ridge chamfer skipped: found {} of {} top edges '
+                '(radius {:.4f} cm at {:.4f} cm, {} rejected)'.format(
+                    len(top_edges), grip_count, expected_grip_radius_cm,
+                    expected_arc_distance_cm, rejected))
             return None
 
-        # 3. Return the top edges
-        radius_match_top.sort(key=lambda x: x[1])
         result = adsk.core.ObjectCollection.create()
-        for edge, _ in radius_match_top[:grip_count]:
+        for edge in top_edges[:grip_count]:
             result.add(edge)
-
-        tm_helpers.log('GripRidgeChamfer: returning {} edges'.format(result.count))
         return result
 
     except Exception:
         msg = 'Error in getGripRidgeChamferEdges:\n{}'.format(traceback.format_exc())
         tm_helpers.log(msg)
-        if tm_state._ui:
-            tm_state._ui.messageBox(msg)
         return None
 
 
@@ -560,8 +508,8 @@ def addAngleChamferToEdge(component, edge, chamferSize, angleDeg):
 
         chamfers = component.features.chamferFeatures
 
-        # Accept either a single edge or an ObjectCollection
-        if isinstance(edge, adsk.core.ObjectCollection):
+        # Accept either a single edge or a collection of edges
+        if hasattr(edge, 'count'):
             edges = edge
         else:
             edges = adsk.core.ObjectCollection.create()
@@ -596,7 +544,19 @@ def findDistanceThroughBody(sketch, circleCenter, targetBody, direction):
 
         multiplier = 1.0 if direction == adsk.fusion.ExtentDirections.PositiveExtentDirection else -1.0
 
+        # Never need to search further than the body's own diagonal.
         maxDistance = 100.0
+        try:
+            bbox = targetBody.boundingBox
+            diagonal = math.sqrt(
+                (bbox.maxPoint.x - bbox.minPoint.x) ** 2 +
+                (bbox.maxPoint.y - bbox.minPoint.y) ** 2 +
+                (bbox.maxPoint.z - bbox.minPoint.z) ** 2)
+            if diagonal > 0:
+                maxDistance = min(maxDistance, diagonal + 0.2)
+        except Exception:
+            pass
+
         stepSize = 0.1
 
         insideBody = False
@@ -757,10 +717,10 @@ def create_grip_ridge_sketch(sketch, center_point_2d, clearance_dia_mm,
                 arc_center, arc_circle_radius)
             grip_circles.append((circle, angle_deg))
 
-        # Trim each grip ridge circle against the clearance circle.
-        # After trimming, each full circle becomes an arc segment representing
-        # only the portion that extends OUTSIDE the clearance circle.
-        # This creates clean, separable arc ridge edges that can be chamfered.
+        # Trim away the outer half of each grip ridge circle: the hit point below
+        # is on the outward side, and Fusion removes the segment under it. What
+        # remains is the arc inside the clearance circle, so the cut profile is
+        # the bore minus those lobes - i.e. ridges protruding into the bore.
         for circle, angle_deg in grip_circles:
             angle_rad = math.radians(angle_deg)
             # Point in the middle of the outer arc (furthest from hole center)
