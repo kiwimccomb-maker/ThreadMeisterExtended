@@ -1,1 +1,1 @@
-# ThreadMeister core module package
+# ThreadMeister Extended core module package

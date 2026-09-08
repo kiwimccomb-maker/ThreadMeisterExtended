@@ -1,5 +1,5 @@
 """
-Standalone matplotlib visualization for ThreadMeister profile fixtures.
+Standalone matplotlib visualization for ThreadMeister Extended profile fixtures.
 
 Multi-stage filter visualization with keyboard navigation.
 

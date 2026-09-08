@@ -1,6 +1,20 @@
 # Changelog
 
-## Unreleased
+## 1.4.0 — 2026-09-08 — ThreadMeister Extended
+
+Renamed
+- **The add-in is now ThreadMeister Extended**, separate from the original it
+  forks. `ThreadMeister.py`/`.manifest`/`.png` are renamed to
+  `ThreadMeisterExtended.*`, the command id is `ThreadMeisterExtendedCmd`, the
+  button reads "ThreadMeister Extended", and it deploys to
+  `AddIns\ThreadMeisterExtended`. It can now be installed alongside the original
+  instead of colliding with it
+- Manifests carry the fork's id, author (Connor McComb) and repository URL;
+  `License.txt` keeps Andreas Kircher's copyright as MIT requires and adds the
+  fork's beside it
+- `deploy.bat` removes the pre-rename `ThreadMeister.*` files from the target
+  folder, which would otherwise leave two manifests in one add-in folder
+- Fixed the README's clone URL: it pointed at `kiwimccomb`, not `kiwimccomb-maker`
 
 Added
 - **Restore Defaults** in both dialog groups: one puts the six settings back to
@@ -25,7 +39,7 @@ Added
   cm conversions from the grip path
 - **In-dialog Settings group**: chamfer size, blind hole extra depth, bottom
   fillet radius, grip chamfer angle, success message and logging are editable
-  from the ThreadMeister dialog. Values apply to the holes being created and are
+  from the ThreadMeister Extended dialog. Values apply to the holes being created and are
   saved back to `config.ini` on OK; cancelling changes nothing
 - The info panel now recalculates live from those values instead of the last
   loaded config

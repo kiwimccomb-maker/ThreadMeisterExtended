@@ -1,5 +1,5 @@
 @echo off
-:: deploy.bat – Deploy ThreadMeister to the Fusion 360 AddIns folder
+:: deploy.bat – Deploy ThreadMeister Extended to the Fusion 360 AddIns folder
 ::
 :: Usage:
 ::   deploy.bat          deploy to Fusion 360 AddIns folder
@@ -12,14 +12,14 @@ pushd "%~dp0.."
 set "SOURCE=%CD%\"
 popd
 
-set "TARGET=%APPDATA%\Autodesk\Autodesk Fusion 360\API\AddIns\ThreadMeister"
+set "TARGET=%APPDATA%\Autodesk\Autodesk Fusion 360\API\AddIns\ThreadMeisterExtended"
 
 :: Check for dry-run flag
 set DRYRUN=0
 if /i "%1"=="/preview" set DRYRUN=1
 
 echo.
-echo ThreadMeister Deploy
+echo ThreadMeister Extended Deploy
 echo   Source : %SOURCE%
 echo   Target : %TARGET%
 echo.
@@ -36,9 +36,10 @@ if not exist "%TARGET%\" (
 )
 
 :: ── Copy Python modules and manifests ────────────────────────────────────────
-call :CopyFile "ThreadMeister.py"
+call :CleanupOldNames
+call :CopyFile "ThreadMeisterExtended.py"
 call :CopyCore
-call :CopyFile "ThreadMeister.manifest"
+call :CopyFile "ThreadMeisterExtended.manifest"
 call :CopyFile "manifest.json"
 call :CopyFile "License.txt"
 call :CopyFile "Readme.md"
@@ -78,9 +79,21 @@ if %DRYRUN%==1 (
     echo Dry run complete. No files were changed.
 ) else (
     echo Done. Reload the add-in in Fusion 360:
-    echo   Scripts and Add-Ins ^> ThreadMeister ^> Run
+    echo   Scripts and Add-Ins ^> ThreadMeister Extended ^> Run
 )
 echo.
+goto :eof
+
+:: ── Helper: remove the pre-rename entry point ────────────────────
+:: Fusion matches <folder>.manifest, so leaving ThreadMeister.manifest behind
+:: next to ThreadMeisterExtended.manifest gives the folder two manifests.
+:CleanupOldNames
+for %%F in (ThreadMeister.py ThreadMeister.manifest ThreadMeister.png) do (
+    if exist "%TARGET%\%%F" (
+        if %DRYRUN%==0 del /q "%TARGET%\%%F"
+        echo   Removed  %%F  ^(renamed to ThreadMeisterExtended.*^)
+    )
+)
 goto :eof
 
 :: ── Helper: copy a single file ────────────────────────────────────────────────

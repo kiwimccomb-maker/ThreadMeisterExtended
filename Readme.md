@@ -7,16 +7,21 @@
 <img src="https://img.shields.io/badge/Distribution-GitHub%20%7C%20App%20Store-6E40C9?style=for-the-badge" alt="Distribution">
 </p>
 
-<h1 align="center">ThreadMeister – Heat-Set Insert Add-in for Fusion 360</h1>
+<h1 align="center">ThreadMeister Extended – Heat-Set Insert Add-in for Fusion 360</h1>
 
 <div align="center">
-<img src="resources/images/Title.png" alt="ThreadMeister Logo" width="600">
+<img src="resources/images/Title.png" alt="ThreadMeister Extended Logo" width="600">
 </div>
 
 <p align="center" style="max-width:600px; margin: 0 auto;">An add-in for Autodesk Fusion 360 that automates the creation of heat-set insert holes for 3D printing, using insert dimension recommendations from <a href="https://cnckitchen.com">CNC Kitchen</a>.</p>
 
 <p align="center">
-<strong>Extended fork</strong> of the original <a href="https://github.com/AndreasOKircher/ThreadMeister">ThreadMeister</a> by Andreas Kircher, with the addition of <strong>Grip Ridge</strong> insert holes.
+<strong>ThreadMeister Extended</strong> is an extended fork of the original <a href="https://github.com/AndreasOKircher/ThreadMeister">ThreadMeister</a> by <strong>Andreas Kircher</strong>, adding <strong>Grip Ridge</strong> insert holes and in-dialog configuration.<br>
+It installs as its own add-in and can sit alongside the original.
+</p>
+
+<p align="center">
+Original ThreadMeister &copy; 2026 Andreas Kircher &middot; ThreadMeister Extended &copy; 2026 Connor McComb &middot; MIT licensed.
 </p>
 
 ## Features
@@ -38,7 +43,7 @@
 <br>
 
 
-<div align="center"> <img src="resources/images/ThreadMeisterAnimation.gif" alt="ThreadMeister in action" width="600"> </div>
+<div align="center"> <img src="resources/images/ThreadMeisterAnimation.gif" alt="ThreadMeister Extended in action" width="600"> </div>
 
 ## Grip Ridge Inserts
 
@@ -111,7 +116,7 @@ Tired of googling insert dimensions every time you need a bore for a heat-set in
 
 ```bash
 cd "C:\Users\[YourUsername]\AppData\Roaming\Autodesk\Autodesk Fusion 360\API\AddIns\"
-git clone https://github.com/kiwimccomb/ThreadMeisterExtended.git ThreadMeisterExtended
+git clone https://github.com/kiwimccomb-maker/ThreadMeisterExtended.git ThreadMeisterExtended
 ```
 
 ## Usage
@@ -121,7 +126,7 @@ git clone https://github.com/kiwimccomb/ThreadMeisterExtended.git ThreadMeisterE
 
 1. **Create a sketch** and place **sketch points** where insert holes should be created.
 2. **Finish the sketch**
-3. Click the **"ThreadMeister"** button in **SOLID → MODIFY** menu
+3. Click the **"ThreadMeister Extended"** button in **SOLID → MODIFY** menu
 4. **Select your target body** (the part to add holes to)
 5. **Select one or more sketch points**
 6. Choose your **insert size** (e.g., M3 x 5.7mm standard, or M3 Grip)
@@ -154,7 +159,7 @@ All dimensions follow CNC Kitchen's official recommendations:
 ### Customize settings
 
 Most of the day-to-day parameters can be changed from the **Settings** group at
-the bottom of the ThreadMeister dialog — see [In-dialog Settings](#in-dialog-settings)
+the bottom of the ThreadMeister Extended dialog — see [In-dialog Settings](#in-dialog-settings)
 below. Everything, including the insert tables, can be edited in `config.ini`,
 located in the add-in folder. The config is organized into five sections:
 
@@ -181,7 +186,7 @@ Each line defines a grip ridge insert: `name = clearance_dia, hole_depth, grip_e
 
 ### In-dialog Settings
 
-Expand the **Settings** group at the bottom of the ThreadMeister dialog to change
+Expand the **Settings** group at the bottom of the ThreadMeister Extended dialog to change
 these without editing `config.ini` by hand. Values apply to the holes created by
 that click of **OK**, and are written back to `config.ini` so they stick.
 
@@ -241,7 +246,7 @@ The warning is advisory — **OK** still works, in case you want the geometry an
 The standard `[Inserts]` table is still edited in `config.ini`.
 
 To reset *everything*, including any inserts you added, delete `config.ini` from
-the add-in folder — ThreadMeister writes a fresh default one the next time it
+the add-in folder — ThreadMeister Extended writes a fresh default one the next time it
 loads.
 
 ## Screenshots
@@ -289,6 +294,27 @@ loads.
 * Enable logging (`enable_logging = True`) to see diagnostic output about edge detection
 
 ## Changelog
+
+### v1.4.0 — 2026-09-08
+
+* **Renamed to ThreadMeister Extended** — own add-in id, manifest and install
+  folder, so it can be installed alongside the original ThreadMeister
+* **In-dialog Settings** — chamfer size, blind hole extra depth, bottom fillet
+  radius, grip chamfer angle, success message and logging, editable without
+  opening `config.ini`
+* **Grip Ridge Parameters** — clearance diameter, hole depth, ridge chamfer,
+  ridge diameter, ridge distance from centre and ridge count, per insert
+* **Restore Defaults** in both groups — settings, or one grip insert at a time
+* Info panel warns when a grip ridge combination cannot cut (ridges clear of the
+  bore, inside it, or overlapping each other)
+* Config writes now edit `config.ini` in place, so comments survive
+* **Bug fixes**: grip-ridge depth was 10× too shallow from the second hole of a
+  multi-point cut; the depth spinner opened on the wrong value; grip chamfers
+  could be applied to a different hole's ridges; the bottom-fillet preference
+  was cleared by cutting a through hole; profile matching could hang Fusion on a
+  busy sketch; re-running after a failed stop threw on a duplicate command
+* Removed dead code and a stray `requirements.txt` (a pip freeze of an unrelated
+  environment); 110 tests now cover config, geometry and the dialog
 
 ### v1.3.2 — 2026-06-16
 
@@ -346,7 +372,8 @@ Contributions are welcome! Please feel free to submit issues or pull requests.
 
 ## Credits
 
-* **Original project**: [ThreadMeister](https://github.com/AndreasOKircher/ThreadMeister) by [Andreas Kircher](https://github.com/AndreasOKircher)
+* **Original project**: [ThreadMeister](https://github.com/AndreasOKircher/ThreadMeister) by [Andreas Kircher](https://github.com/AndreasOKircher) — ThreadMeister Extended is a fork of that work and would not exist without it
+* **This fork**: [ThreadMeister Extended](https://github.com/kiwimccomb-maker/ThreadMeisterExtended) by [Connor McComb](https://github.com/kiwimccomb-maker)
 * **Grip Ridge feature**: Inspired by [Made With Layers](https://www.madewithlayers.com/) (Thomas Salanderer)
 * **Grip Ridge implementation**: Added to this fork (with significant AI assistance — it took many iterations to get the arc detection and chamfer logic right)
 * **Insert specifications**: [CNC Kitchen](https://cnckitchen.com)
@@ -355,8 +382,9 @@ Contributions are welcome! Please feel free to submit issues or pull requests.
 
 ## License
 
-This project is licensed under the MIT License.
-See the LICENSE file for details.
+This project is licensed under the MIT License, inherited from the original
+ThreadMeister. See `License.txt` for details — it carries both the original
+copyright (Andreas Kircher) and this fork's (Connor McComb).
 
 ## Disclaimer
 
@@ -404,11 +432,11 @@ Workarounds:
 
 In earlier versions, ThreadMeister drew the bore circle in the user's existing sketch. If that sketch had many intersecting lines or Fusion's auto-projected body edges near the bore location, profile selection could fail.
 
-Since v1.2.2.8, ThreadMeister creates a clean temporary sketch containing only the bore circle, eliminating this issue entirely.
+Since v1.2.2.8, ThreadMeister Extended creates a clean temporary sketch containing only the bore circle, eliminating this issue entirely.
 
 ## Privacy Policy
 
-ThreadMeister does not collect, store, or transmit any personal data or usage information. All operations are performed locally within Autodesk Fusion 360. No data is sent to external servers, third parties, analytics tools, or advertising networks. No data retention or deletion policies are required as no data is collected. Since no data is collected, there is no consent to revoke or data to request deletion of.
+ThreadMeister Extended does not collect, store, or transmit any personal data or usage information. All operations are performed locally within Autodesk Fusion 360. No data is sent to external servers, third parties, analytics tools, or advertising networks. No data retention or deletion policies are required as no data is collected. Since no data is collected, there is no consent to revoke or data to request deletion of.
 
 
 ---

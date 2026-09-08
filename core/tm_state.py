@@ -1,5 +1,5 @@
 """
-tm_state.py – Shared state, constants, and globals for ThreadMeister.
+tm_state.py – Shared state, constants, and globals for ThreadMeister Extended.
 
 All other tm_* modules import from here. This module has no dependencies
 on other tm_* modules.
@@ -48,9 +48,11 @@ except Exception:
     _ui = None
 
 # Command identity
-CMD_ID = 'ThreadMeisterCmd'
-CMD_NAME = 'ThreadMeister'
-CMD_Description = 'Create heat-set insert holes with CNC Kitchen specifications'
+# Distinct from the original add-in's 'ThreadMeisterCmd' so both can be installed
+CMD_ID = 'ThreadMeisterExtendedCmd'
+CMD_NAME = 'ThreadMeister Extended'
+CMD_Description = ('Create heat-set insert holes and grip ridge holes '
+                   'with CNC Kitchen specifications')
 
 # Toolbar panel
 PANEL_ID = 'SolidModifyPanel'  # MODIFY panel in SOLID workspace

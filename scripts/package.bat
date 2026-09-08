@@ -1,5 +1,5 @@
 @echo off
-:: package.bat – Create App Store .zip in dist\
+:: package.bat – Create App Store .zip for ThreadMeister Extended in dist\
 ::
 :: Usage:
 ::   dist\package.bat
@@ -12,10 +12,10 @@ set "ROOT=%CD%"
 popd
 
 set "DIST=%ROOT%\dist"
-set "ZIPFILE=%DIST%\ThreadMeister.zip"
+set "ZIPFILE=%DIST%\ThreadMeisterExtended.zip"
 
 echo.
-echo ThreadMeister Packaging
+echo ThreadMeister Extended Packaging
 echo   Source : %ROOT%
 echo   Output : %ZIPFILE%
 echo.
@@ -27,18 +27,18 @@ if exist "%ZIPFILE%" (
 )
 
 :: Use PowerShell to create the zip with correct folder structure
-:: All files go into a ThreadMeister\ root folder inside the zip
+:: All files go into a ThreadMeisterExtended\ root folder inside the zip
 powershell -NoProfile -Command ^
   "$root = '%ROOT%';" ^
   "$zip = '%ZIPFILE%';" ^
-  "$tmp = Join-Path $env:TEMP 'ThreadMeister_pkg';" ^
-  "$pkg = Join-Path $tmp 'ThreadMeister';" ^
+  "$tmp = Join-Path $env:TEMP 'ThreadMeisterExtended_pkg';" ^
+  "$pkg = Join-Path $tmp 'ThreadMeisterExtended';" ^
   "if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force };" ^
   "New-Item -ItemType Directory -Path $pkg -Force | Out-Null;" ^
   "New-Item -ItemType Directory -Path (Join-Path $pkg 'core') -Force | Out-Null;" ^
   "New-Item -ItemType Directory -Path (Join-Path $pkg 'resources\icons') -Force | Out-Null;" ^
-  "Copy-Item (Join-Path $root 'ThreadMeister.py') $pkg;" ^
-  "Copy-Item (Join-Path $root 'ThreadMeister.manifest') $pkg;" ^
+  "Copy-Item (Join-Path $root 'ThreadMeisterExtended.py') $pkg;" ^
+  "Copy-Item (Join-Path $root 'ThreadMeisterExtended.manifest') $pkg;" ^
   "Copy-Item (Join-Path $root 'manifest.json') $pkg;" ^
   "Copy-Item (Join-Path $root 'config.ini') $pkg;" ^
   "Copy-Item (Join-Path $root 'License.txt') $pkg;" ^
@@ -46,12 +46,18 @@ powershell -NoProfile -Command ^
   "Copy-Item (Join-Path $root 'core\*.py') (Join-Path $pkg 'core');" ^
   "Copy-Item (Join-Path $root 'resources\icons\*') (Join-Path $pkg 'resources\icons');" ^
   "Copy-Item (Join-Path $root 'resources\help.html') (Join-Path $pkg 'resources');" ^
-  "Copy-Item (Join-Path $root 'ThreadMeister.png') $pkg;" ^
+  "Copy-Item (Join-Path $root 'ThreadMeisterExtended.png') $pkg;" ^
+  "New-Item -ItemType Directory -Path (Split-Path $zip) -Force | Out-Null;" ^
   "Compress-Archive -Path $pkg -DestinationPath $zip -Force;" ^
   "Remove-Item $tmp -Recurse -Force;" ^
-  "Write-Host '  Created  $zip'"
+  "Write-Host ('  Created  ' + $zip)"
 
 echo.
-echo Done. Zip is ready at:
-echo   %ZIPFILE%
+if exist "%ZIPFILE%" (
+    echo Done. Zip is ready at:
+    echo   %ZIPFILE%
+) else (
+    echo FAILED - no zip was created. See the error above.
+    exit /b 1
+)
 echo.

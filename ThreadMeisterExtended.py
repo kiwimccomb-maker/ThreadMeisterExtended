@@ -1,16 +1,25 @@
 """
-ThreadMeister – Heat-set Insert Creator for Fusion 360
-Copyright (c) 2026 Andreas Kircher
+ThreadMeister Extended – Heat-set Insert Creator for Fusion 360
+
+Copyright (c) 2026 Andreas Kircher (original ThreadMeister)
+Copyright (c) 2026 Connor McComb (ThreadMeister Extended)
 
 SPDX-License-Identifier: MIT
+
+An extended fork of ThreadMeister by Andreas Kircher, adding grip ridge insert
+holes and in-dialog configuration. It installs alongside the original as a
+separate add-in.
 
 This add-in automates the creation of heat-set insert holes for 3D printing,
 using the dimensional specifications from CNC Kitchen.
 
-Author: Andreas Kircher (Andreas.O.Kircher@gmail.com)
-Created with assistance from: Claude (Anthropic) / Perplexity
+Fork author: Connor McComb
+  https://github.com/kiwimccomb-maker/ThreadMeisterExtended
+Original author: Andreas Kircher (Andreas.O.Kircher@gmail.com)
+  https://github.com/AndreasOKircher/ThreadMeister
+Original created with assistance from: Claude (Anthropic) / Perplexity
 Insert specifications from: CNC Kitchen (cnckitchen.com)
-Version: 1.3.2
+Version: 1.4.0
 
 Features:
 - Creates heat-set insert holes at sketch points
@@ -25,7 +34,7 @@ Features:
 
 Usage:
 1. Create a sketch with points where you want insert holes
-2. Click "ThreadMeister" button in SOLID > MODIFY menu
+2. Click "ThreadMeister Extended" button in SOLID > MODIFY menu
 3. Select target body and sketch points
 4. Choose insert size and options
 5. Done!

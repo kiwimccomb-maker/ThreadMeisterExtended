@@ -1,5 +1,5 @@
 """
-Debug export utility for ThreadMeister.
+Debug export utility for ThreadMeister Extended.
 
 Exports sketch and circle data to JSON for fixture-based testing.
 Run from Fusion 360 to capture real profile data at both accuracy levels.

@@ -17,12 +17,12 @@
 ## Project File Structure
 
 ```
-ThreadMeister/
-├── ThreadMeister.py          ← Entry point: run(), stop(), imports
-├── ThreadMeister.manifest    ← Fusion 360 runtime manifest
+ThreadMeisterExtended/
+├── ThreadMeisterExtended.py       ← Entry point: run(), stop(), imports
+├── ThreadMeisterExtended.manifest ← Fusion 360 runtime manifest
 ├── manifest.json             ← Autodesk App Store manifest
 ├── config.ini                ← User-editable insert specs and settings
-├── ThreadMeister.png         ← Add-in icon (App Store)
+├── ThreadMeisterExtended.png      ← Add-in icon (App Store)
 ├── License.txt               ← MIT License
 ├── Readme.md                 ← GitHub README
 ├── core/
@@ -87,7 +87,7 @@ The config file is organized into four sections:
 
 ### Execution flow (v1.2.0)
 ```
-User clicks ThreadMeister button
+User clicks ThreadMeister Extended button
   → CommandCreatedHandler: build UI dialog
   → User selects body, points, options, clicks OK
   → CommandExecuteHandler: for each selected point:
@@ -129,7 +129,7 @@ Previously, ThreadMeister added the bore circle directly to the user's existing 
 
 ### The solution: `addWithoutEdges(face)`
 
-Instead of drawing in the user's sketch, ThreadMeister now creates a temporary clean sketch per bore:
+Instead of drawing in the user's sketch, ThreadMeister Extended now creates a temporary clean sketch per bore:
 
 ```python
 face = parentSketch.referencePlane
@@ -188,7 +188,7 @@ The clean temp sketch approach eliminates most profile recognition issues caused
 - Bodies with complex topology or thin walls where Fusion struggles to resolve the cut.
 - Cases where the extrusion direction is ambiguous.
 
-The old workarounds (simplify sketch, use construction geometry, move bore point to separate sketch) are no longer necessary — ThreadMeister now creates its own clean sketch automatically.
+The old workarounds (simplify sketch, use construction geometry, move bore point to separate sketch) are no longer necessary — ThreadMeister Extended now creates its own clean sketch automatically.
 
 ### Bounding Box Filter Infeasibility
 **Finding (Phase 4, 2026-03-12):** Attempted to use profile bounding boxes as a coarse filter to speed up profile selection.

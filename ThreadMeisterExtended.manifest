@@ -1,0 +1,14 @@
+{
+    "autodeskProduct": "Fusion",
+    "type": "addin",
+    "id": "ThreadMeisterExtended",
+    "author": "Connor McComb",
+    "description": {
+        "": "Create heat-set insert holes and grip ridge holes with CNC Kitchen recommendations"
+    },
+    "version": "1.4.0",
+    "runOnStartup": false,
+    "supportedOS": "windows|mac",
+    "editEnabled": true,
+    "iconFilename": "ThreadMeisterExtended.png"
+}
