@@ -64,53 +64,55 @@ def load_config(config_file=None):
 
     errors = []
     warnings = []
+    defaults = tm_state.DEFAULT_CONFIG
 
     try:
         config = _read_config_file(config_file)
         needs_migration = _is_old_format(config)
 
         # --- [Settings]: Design parameters ---
-        chamfer = _get(config, 'chamfer_size', 'Settings', 0.5, 'float')
+        chamfer = _get(config, 'chamfer_size', 'Settings', defaults['chamfer_size'], 'float')
         if chamfer <= 0 or chamfer > 5.0:
-            warnings.append(f'Chamfer size {chamfer}mm is unusual (expected 0-5mm). Using default 0.5mm.')
-            chamfer = 0.5
+            warnings.append(f'Chamfer size {chamfer}mm is unusual (expected 0-5mm). '
+                            f'Using default {defaults["chamfer_size"]}mm.')
+            chamfer = defaults['chamfer_size']
         tm_state.CONFIG['chamfer_size'] = chamfer
 
-        extra_depth = _get(config, 'blind_hole_extra_depth', 'Settings', 1.0, 'float')
+        extra_depth = _get(config, 'blind_hole_extra_depth', 'Settings',
+                           defaults['blind_hole_extra_depth'], 'float')
         if extra_depth < 0 or extra_depth > 10.0:
-            warnings.append(f'Extra depth {extra_depth}mm is unusual (expected 0-10mm). Using default 1.0mm.')
-            extra_depth = 1.0
+            warnings.append(f'Extra depth {extra_depth}mm is unusual (expected 0-10mm). '
+                            f'Using default {defaults["blind_hole_extra_depth"]}mm.')
+            extra_depth = defaults['blind_hole_extra_depth']
         tm_state.CONFIG['blind_hole_extra_depth'] = extra_depth
 
-        bottom_radius = _get(config, 'bottom_radius_size', 'Settings', 0.5, 'float')
+        bottom_radius = _get(config, 'bottom_radius_size', 'Settings',
+                             defaults['bottom_radius_size'], 'float')
         if bottom_radius < 0 or bottom_radius > 5.0:
-            warnings.append(f'Bottom radius {bottom_radius}mm is unusual (expected 0-5mm). Using default 0.5mm.')
-            bottom_radius = 0.5
+            warnings.append(f'Bottom radius {bottom_radius}mm is unusual (expected 0-5mm). '
+                            f'Using default {defaults["bottom_radius_size"]}mm.')
+            bottom_radius = defaults['bottom_radius_size']
         tm_state.CONFIG['bottom_radius_size'] = bottom_radius
 
         # --- [UI State]: Remembered menu state ---
-        tm_state.CONFIG['chamfer_enabled_default'] = _get(
-            config, 'chamfer_enabled_default', 'UI State', True, 'boolean')
-        tm_state.CONFIG['bottom_radius_enabled_default'] = _get(
-            config, 'bottom_radius_enabled_default', 'UI State', False, 'boolean')
-        tm_state.CONFIG['show_success_message'] = _get(
-            config, 'show_success_message', 'UI State', True, 'boolean')
-        tm_state.CONFIG['hole_type_blind'] = _get(
-            config, 'hole_type_blind', 'UI State', True, 'boolean')
+        for key in ('chamfer_enabled_default', 'bottom_radius_enabled_default',
+                    'show_success_message', 'hole_type_blind'):
+            tm_state.CONFIG[key] = _get(config, key, 'UI State', defaults[key], 'boolean')
         tm_state.CONFIG['last_selected_insert'] = _get(
-            config, 'last_selected_insert', 'UI State', 'M3 x 5.7mm (standard)')
+            config, 'last_selected_insert', 'UI State', defaults['last_selected_insert'])
 
         # --- [Developer]: Debug flags ---
-        tm_state.CONFIG['enable_logging'] = _get(
-            config, 'enable_logging', 'Developer', False, 'boolean')
-        tm_state.CONFIG['enable_debug_export'] = _get(
-            config, 'enable_debug_export', 'Developer', False, 'boolean')
+        for key in ('enable_logging', 'enable_debug_export'):
+            tm_state.CONFIG[key] = _get(config, key, 'Developer', defaults[key], 'boolean')
 
         # --- Grip-ridge chamfer angle ---
-        grip_chamfer_angle = _get(config, 'grip_chamfer_angle', 'Settings', 78, 'float')
+        grip_chamfer_angle = _get(config, 'grip_chamfer_angle', 'Settings',
+                                  defaults['grip_chamfer_angle'], 'float')
         if grip_chamfer_angle < 15 or grip_chamfer_angle > 85:
-            warnings.append(f'Grip chamfer angle {grip_chamfer_angle}° is unusual (expected 15-85°). Using default 78°.')
-            grip_chamfer_angle = 78
+            warnings.append(f'Grip chamfer angle {grip_chamfer_angle}° is unusual '
+                            f'(expected 15-85°). Using default '
+                            f'{defaults["grip_chamfer_angle"]}°.')
+            grip_chamfer_angle = defaults['grip_chamfer_angle']
         tm_state.CONFIG['grip_chamfer_angle'] = grip_chamfer_angle
 
         # --- [Inserts] ---
@@ -396,6 +398,49 @@ SETTINGS_INPUTS = {
     'setShowMessage': ('show_success_message', 'UI State'),
     'setEnableLogging': ('enable_logging', 'Developer'),
 }
+
+
+# Per-insert grip ridge parameters the dialog can edit. Order matches the
+# GRIP_RIDGE_INSERTS spec tuple, so index here == index there.
+GRIP_RIDGE_INPUTS = (
+    'gripClearanceDia',
+    'gripEdgeDepth',
+    'gripEdgeChamfer',
+    'gripRidgeDia',
+    'gripArcDistance',
+    'gripCount',
+)
+
+
+def read_grip_inputs(inputs, insert_name):
+    """Read the Grip Ridge group back as a GRIP_RIDGE_INSERTS spec tuple.
+
+    Any input that is not there falls back to the stored spec, so this works
+    before the group is built and for inserts the dialog never showed.
+    """
+    spec = list(tm_state.GRIP_RIDGE_INSERTS[insert_name])
+    for index, input_id in enumerate(GRIP_RIDGE_INPUTS):
+        command_input = inputs.itemById(input_id)
+        if command_input:
+            spec[index] = command_input.value
+    spec[5] = int(spec[5])
+    return tuple(spec)
+
+
+def save_grip_ridge_insert(insert_name, spec, config_file=None):
+    """Persist one [GripRidgeInserts] row from a spec tuple."""
+    row = ', '.join(str(value) for value in spec)
+    return save_values({'GripRidgeInserts': {insert_name: row}}, config_file)
+
+
+def default_grip_spec(insert_name):
+    """The shipped spec for a grip insert.
+
+    Falls back to whatever is stored for inserts we do not ship, so restoring a
+    user-added insert puts back its config.ini row rather than doing nothing.
+    """
+    return get_default_grip_ridge_inserts().get(
+        insert_name, tm_state.GRIP_RIDGE_INSERTS.get(insert_name))
 
 
 def read_settings_inputs(inputs):

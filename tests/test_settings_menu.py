@@ -20,40 +20,6 @@ from tm_config import (
 )
 
 
-SAMPLE_CONFIG = """[Settings]
-chamfer_size = 0.5
-blind_hole_extra_depth = 1.0
-bottom_radius_size = 0.5
-grip_chamfer_angle = 78
-
-[Inserts]
-M3 x 5.7mm (standard) = 4.4, 5.7, 1.6
-M4 x 8.1mm (standard) = 5.6, 8.1, 2.0
-
-[GripRidgeInserts]
-# Format: clearance_dia, hole_depth, grip_edge_chamfer, grip_ridge_dia, grip_arc_distance, grip_count
-M3 Grip = 3.2, 7, 0.28, 1.5, 2.05, 3
-
-[UI State]
-chamfer_enabled_default = True
-bottom_radius_enabled_default = True
-show_success_message = False
-hole_type_blind = True
-last_selected_insert = M3 x 5.7mm (standard)
-
-[Developer]
-enable_logging = False
-enable_debug_export = False
-"""
-
-
-@pytest.fixture
-def config_file(tmp_path):
-    path = tmp_path / 'config.ini'
-    io.open(str(path), 'w', encoding='utf-8', newline='\n').write(SAMPLE_CONFIG)
-    return str(path)
-
-
 def read(path):
     return io.open(path, encoding='utf-8').read()
 
@@ -194,44 +160,21 @@ class TestSaveSettings:
         assert 'not_a_setting' not in read(config_file)
 
 
-class RecordingInputs:
-    """Minimal stand-in for Fusion's CommandInputs that records what was added."""
-
-    def __init__(self):
-        self.spinners = {}
-        self.bools = {}
-        self.groups = {}
-
-    def addGroupCommandInput(self, input_id, name):
-        group = MagicMock()
-        group.children = self
-        self.groups[input_id] = name
-        return group
-
-    def addFloatSpinnerCommandInput(self, input_id, name, unit, minimum,
-                                    maximum, step, initial):
-        self.spinners[input_id] = {'name': name, 'unit': unit, 'min': minimum,
-                                   'max': maximum, 'step': step, 'initial': initial}
-
-    def addBoolValueInput(self, input_id, name, _has_icon, _folder, initial):
-        self.bools[input_id] = {'name': name, 'initial': initial}
-
-
 class TestSettingsGroup:
     """The dialog group and the id -> config key map have to stay in step."""
 
     @pytest.fixture
-    def built(self):
+    def built(self, recording_inputs):
         import tm_ui
-        inputs = RecordingInputs()
-        tm_ui._addSettingsGroup(inputs)
-        return inputs
+        tm_ui._addSettingsGroup(recording_inputs)
+        return recording_inputs
 
     def test_every_mapped_setting_has_an_input(self, built):
         """A drifted id would silently fall back to CONFIG and never save."""
         created = set(built.spinners) | set(built.bools)
 
-        assert created == set(SETTINGS_INPUTS)
+        # setRestoreDefaults is a control, not a stored setting
+        assert created == set(SETTINGS_INPUTS) | {'setRestoreDefaults'}
 
     def test_spinners_open_on_the_current_config_value(self, built, monkeypatch):
         assert built.spinners['setChamferSize']['initial'] == tm_state.CONFIG['chamfer_size']

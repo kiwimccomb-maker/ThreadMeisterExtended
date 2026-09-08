@@ -84,17 +84,8 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             holeTypeGroup.listItems.add('Blind Hole', saved_is_blind)
             holeTypeGroup.listItems.add('Through Hole', not saved_is_blind)
 
-            # Grip-edge depth override (hidden unless a grip-ridge insert is selected)
-            # Default value is the configured hole depth from the grip ridge spec.
-            # Spinner defaultValue must be in cm (Fusion internal units).
-            _, configHoleDepth, _, _, _, _ = tm_state.GRIP_RIDGE_INSERTS.get(
-                lastSelected, (0, 7.0, 0, 0, 0, 3))
-            isGripDefault = lastSelected in tm_state.GRIP_RIDGE_INSERTS
-            inputs.addFloatSpinnerCommandInput(
-                'gripEdgeDepth', 'Hole Depth', 'mm',
-                0.01, 100.0, 0.1, configHoleDepth / 10.0)
-            depthInput = inputs.itemById('gripEdgeDepth')
-            depthInput.isVisible = isGripDefault
+            # Grip ridge parameters (only shown while a Grip insert is selected)
+            _addGripRidgeGroup(inputs, lastSelected)
 
             # Chamfer option
             inputs.addBoolValueInput('addChamfer',
@@ -143,20 +134,37 @@ class InputChangedHandler(adsk.core.InputChangedEventHandler):
                     pointSelect.isEnabled = True
                     pointSelect.hasFocus = True
 
-            # Show/hide grip-edge depth spinner based on insert type
+            # Show the grip ridge group and reload it for the chosen insert
             if changedInput.id == 'insertSize':
-                insertSize = inputs.itemById('insertSize')
-                depthInput = inputs.itemById('gripEdgeDepth')
-                insertName = insertSize.selectedItem.name
+                insertName = inputs.itemById('insertSize').selectedItem.name
                 isGrip = insertName in tm_state.GRIP_RIDGE_INSERTS
-                if depthInput:
-                    depthInput.isVisible = isGrip
-                    if isGrip:
-                        _, configHoleDepth, _, _, _, _ = tm_state.GRIP_RIDGE_INSERTS[insertName]
-                        depthInput.value = configHoleDepth / 10.0
+                group = inputs.itemById('gripRidgeGroup')
+                if group:
+                    group.isVisible = isGrip
+                if isGrip:
+                    spec = tm_state.GRIP_RIDGE_INSERTS[insertName]
+                    for index, input_id in enumerate(tm_config.GRIP_RIDGE_INPUTS):
+                        _setValue(inputs, input_id, spec[index])
 
-            if changedInput.id in ('insertSize', 'holeType', 'addChamfer', 'gripEdgeDepth',
-                                   'setChamferSize', 'setExtraDepth', 'setGripChamferAngle'):
+            # Restore Defaults acts as a button: reset the group, untick, and
+            # let the user see the result before committing with OK.
+            if changedInput.id == 'setRestoreDefaults' and changedInput.value:
+                for input_id, (key, _section) in tm_config.SETTINGS_INPUTS.items():
+                    _setValue(inputs, input_id, tm_state.DEFAULT_CONFIG[key])
+                changedInput.value = False
+
+            if changedInput.id == 'gripRestoreDefaults' and changedInput.value:
+                insertName = inputs.itemById('insertSize').selectedItem.name
+                spec = tm_config.default_grip_spec(insertName)
+                if spec:
+                    for index, input_id in enumerate(tm_config.GRIP_RIDGE_INPUTS):
+                        _setValue(inputs, input_id, spec[index])
+                changedInput.value = False
+
+            if changedInput.id in (('insertSize', 'holeType', 'addChamfer',
+                                    'setChamferSize', 'setExtraDepth', 'setGripChamferAngle',
+                                    'setRestoreDefaults', 'gripRestoreDefaults')
+                                   + tm_config.GRIP_RIDGE_INPUTS):
                 updateInfoText(inputs)
 
         except Exception:
@@ -177,6 +185,47 @@ class ValidateInputsHandler(adsk.core.ValidateInputsEventHandler):
 
         except Exception:
             tm_state._ui.messageBox('Failed:\n{}'.format(traceback.format_exc()))
+
+
+def _setValue(inputs, input_id, value):
+    """Set a command input's value if that input exists."""
+    command_input = inputs.itemById(input_id)
+    if command_input:
+        command_input.value = value
+
+
+def _addGripRidgeGroup(inputs, insert_name):
+    """Add the per-insert Grip Ridge parameters from [GripRidgeInserts].
+
+    Only visible while a Grip insert is selected. Unitless spinners, mm as
+    labelled; min/max mirror the validation in tm_config.load_config().
+    """
+    spec = tm_state.GRIP_RIDGE_INSERTS.get(insert_name)
+    if spec is None:
+        # Hidden anyway, but the inputs still need starting values
+        spec = next(iter(tm_state.GRIP_RIDGE_INSERTS.values()), (3.2, 7, 0.28, 1.5, 2.05, 3))
+    clearance, depth, chamfer, ridge_dia, arc_distance, count = spec
+
+    group = inputs.addGroupCommandInput('gripRidgeGroup', 'Grip Ridge Parameters')
+    children = group.children
+
+    children.addFloatSpinnerCommandInput(
+        'gripClearanceDia', 'Clearance Diameter (mm)', '', 0.1, 50.0, 0.1, clearance)
+    children.addFloatSpinnerCommandInput(
+        'gripEdgeDepth', 'Hole Depth (mm)', '', 0.1, 100.0, 0.5, depth)
+    children.addFloatSpinnerCommandInput(
+        'gripEdgeChamfer', 'Ridge Chamfer (mm)', '', 0.0, 5.0, 0.05, chamfer)
+    children.addFloatSpinnerCommandInput(
+        'gripRidgeDia', 'Ridge Diameter (mm)', '', 0.1, 20.0, 0.1, ridge_dia)
+    children.addFloatSpinnerCommandInput(
+        'gripArcDistance', 'Ridge Distance from Centre (mm)', '', 0.1, 50.0, 0.05, arc_distance)
+    children.addIntegerSpinnerCommandInput(
+        'gripCount', 'Number of Ridges', 1, 12, 1, int(count))
+    children.addBoolValueInput(
+        'gripRestoreDefaults', 'Restore Defaults', True, '', False)
+
+    group.isVisible = insert_name in tm_state.GRIP_RIDGE_INSERTS
+    return group
 
 
 def _addSettingsGroup(inputs):
@@ -210,6 +259,8 @@ def _addSettingsGroup(inputs):
     children.addBoolValueInput(
         'setEnableLogging', 'Enable Logging', True, '',
         tm_state.CONFIG.get('enable_logging', False))
+    children.addBoolValueInput(
+        'setRestoreDefaults', 'Restore Defaults', True, '', False)
 
     return group
 
@@ -233,17 +284,12 @@ def updateInfoText(inputs):
             return
 
         if is_grip_ridge:
+            # Live values from the Grip Ridge group (stored spec until it is built)
             (clearanceDia, holeDepth, gripChamferSize,
-             gripRidgeDia, gripArcDistance, gripCount) = tm_state.GRIP_RIDGE_INSERTS[insertName]
+             gripRidgeDia, gripArcDistance, gripCount) = tm_config.read_grip_inputs(
+                inputs, insertName)
             holeDia = clearanceDia
-
-            # Use spinner value if visible (it's stored in cm internally),
-            # otherwise fall back to the configured hole depth
-            depthInput = inputs.itemById('gripEdgeDepth')
-            if depthInput and depthInput.isVisible:
-                totalDepth = depthInput.value * 10.0
-            else:
-                totalDepth = holeDepth
+            totalDepth = holeDepth
         else:
             holeDia, insertLen, minWall = tm_state.INSERT_SPECS[insertName]
 
@@ -272,6 +318,10 @@ def updateInfoText(inputs):
                     f'Ridges: {gripCount}× Ø{gripRidgeDia:.1f} mm at {gripArcDistance:.2f} mm<br/>' +
                     f'Chamfer: {chamfer_info}<br/>' +
                     f'Hole depth: {depthStr}')
+            warning = tm_helpers.grip_ridge_warning(
+                clearanceDia, gripRidgeDia, gripArcDistance, gripCount)
+            if warning:
+                info += f'<br/><b>Warning:</b> {warning}'
         else:
             info = (f'<b>{insertName}</b><br/>' +
                     f'Hole: {holeDia} mm  ·  Depth: {insertLen} mm<br/>' +

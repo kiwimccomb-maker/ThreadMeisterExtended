@@ -1,6 +1,8 @@
 """
 tm_helpers.py – Utility functions: blind hole depth, logging.
 """
+import math
+
 import adsk.core
 import tm_state
 
@@ -18,6 +20,29 @@ def calc_blind_hole_depth_mm(insert_len_mm, extra_depth_mm, chamfer_mm=0.0):
         Total depth in mm as a float.
     """
     return insert_len_mm + extra_depth_mm + chamfer_mm
+
+
+def grip_ridge_warning(clearance_dia, ridge_dia, arc_distance, ridge_count):
+    """Say why a grip ridge combination will not cut, or None if it is sound.
+
+    Each ridge circle has to cross the bore wall to leave a lobe protruding into
+    the bore, and the ridges must not run into each other. All in mm.
+    """
+    bore_r = clearance_dia / 2.0
+    ridge_r = ridge_dia / 2.0
+
+    if arc_distance >= bore_r + ridge_r:
+        return ('Ridges sit outside the bore: reduce the ridge distance '
+                'or increase the ridge diameter.')
+    if arc_distance <= abs(bore_r - ridge_r):
+        return ('Ridges swallow the bore wall: increase the ridge distance '
+                'or reduce the ridge diameter.')
+    if ridge_count > 1:
+        gap = 2.0 * arc_distance * math.sin(math.pi / ridge_count)
+        if gap <= ridge_dia:
+            return (f'{ridge_count} ridges overlap each other: reduce the count '
+                    'or the ridge diameter.')
+    return None
 
 
 def log(msg):

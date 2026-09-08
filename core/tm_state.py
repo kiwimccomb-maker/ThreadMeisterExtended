@@ -17,8 +17,9 @@ GRIP_RIDGE_INSERTS = {}
 # Filled at startup by tm_config.load_config(), which owns the defaults.
 INSERT_SPECS = {}
 
-# Runtime configuration (overwritten by tm_config.load_config())
-CONFIG = {
+# The shipped defaults. Single source: load_config() falls back to these, and
+# the dialog's Restore Defaults resets to them. Never mutated.
+DEFAULT_CONFIG = {
     'chamfer_size': 0.5,
     'blind_hole_extra_depth': 1.0,
     'chamfer_enabled_default': True,
@@ -31,6 +32,9 @@ CONFIG = {
     'last_selected_insert': 'M3 x 5.7mm (standard)',
     'grip_chamfer_angle': 78,
 }
+
+# Runtime configuration (overwritten by tm_config.load_config())
+CONFIG = dict(DEFAULT_CONFIG)
 
 # Event handler references (kept in scope to prevent garbage collection)
 _handlers = []

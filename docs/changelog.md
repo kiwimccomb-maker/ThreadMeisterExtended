@@ -3,6 +3,26 @@
 ## Unreleased
 
 Added
+- **Restore Defaults** in both dialog groups: one puts the six settings back to
+  the shipped values, the other puts the selected Grip insert back to its shipped
+  row without touching the other sizes. Both act immediately and are only
+  committed on OK, so Cancel undoes them. An insert you added yourself has no
+  shipped row, so it restores from `config.ini` instead
+- `tm_state.DEFAULT_CONFIG` is now the single source of the shipped defaults;
+  `load_config()` falls back to it instead of its own copy of the literals, which
+  had already drifted once (`grip_chamfer_angle` was 60 in one place, 78 in the
+  other)
+- **Grip Ridge Parameters group**: clearance diameter, hole depth, ridge chamfer,
+  ridge diameter, ridge distance from centre and ridge count are editable in the
+  dialog for the selected Grip insert. Shown only for Grip inserts, reloaded when
+  the insert changes, applied to the holes being cut and written back to that
+  insert's `[GripRidgeInserts]` row
+- The info panel warns when a ridge combination cannot cut - ridges clear of the
+  bore, ridges wholly inside it, or ridges overlapping each other. Advisory only;
+  OK still works
+- The grip hole depth spinner is now unitless like the rest, so its value is the
+  millimetre figure shown rather than Fusion-internal cm. Removes the last four
+  cm conversions from the grip path
 - **In-dialog Settings group**: chamfer size, blind hole extra depth, bottom
   fillet radius, grip chamfer angle, success message and logging are editable
   from the ThreadMeister dialog. Values apply to the holes being created and are

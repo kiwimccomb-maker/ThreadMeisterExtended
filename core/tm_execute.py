@@ -30,7 +30,6 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
             addChamfer = inputs.itemById('addChamfer')
             addBottomRadius = inputs.itemById('addBottomRadius')
             exportDebugInput = inputs.itemById('exportDebug')
-            gripEdgeDepthInput = inputs.itemById('gripEdgeDepth')
             shouldExport = exportDebugInput is not None and exportDebugInput.value
 
             # Settings group: apply before anything reads CONFIG so the change
@@ -56,15 +55,12 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
             is_grip_ridge = insertName in tm_state.GRIP_RIDGE_INSERTS
 
             if is_grip_ridge:
-                (clearanceDia, holeDepth, gripChamferSize,
-                 gripRidgeDia, gripArcDistance, gripCount) = tm_state.GRIP_RIDGE_INSERTS[insertName]
-                # Use spinner value if present and visible, otherwise use configured hole depth
-                # Note: gripEdgeDepthInput.value is in cm (Fusion's internal unit), convert to mm
-                if gripEdgeDepthInput is not None and gripEdgeDepthInput.isVisible:
-                    insertLen = gripEdgeDepthInput.value * 10.0  # cm -> mm
-                else:
-                    insertLen = holeDepth
-                gripDepthMm = insertLen
+                # Grip Ridge group: apply to this run, then persist the row
+                spec = tm_config.read_grip_inputs(inputs, insertName)
+                tm_state.GRIP_RIDGE_INSERTS[insertName] = spec
+                tm_config.save_grip_ridge_insert(insertName, spec)
+                (clearanceDia, gripDepthMm, gripChamferSize,
+                 gripRidgeDia, gripArcDistance, gripCount) = spec
                 holeDia = clearanceDia
             else:
                 holeDia, insertLen, minWall = tm_state.INSERT_SPECS[insertName]

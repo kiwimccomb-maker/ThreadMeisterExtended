@@ -38,7 +38,7 @@ def make_selection_input(entities):
 
 
 def build_args(insert_name, point_count, is_blind=True, chamfer=False,
-               spinner_value_cm=None):
+               spinner_value_mm=None):
     """Assemble the command inputs the handler reads."""
     body = MagicMock()
     component = body.parentComponent
@@ -53,8 +53,8 @@ def build_args(insert_name, point_count, is_blind=True, chamfer=False,
         points.append(point)
 
     spinner = None
-    if spinner_value_cm is not None:
-        spinner = make_input(isVisible=True, value=spinner_value_cm)
+    if spinner_value_mm is not None:
+        spinner = make_input(isVisible=True, value=spinner_value_mm)
 
     inputs = {
         'bodySelect': make_selection_input([body]),
@@ -84,6 +84,7 @@ def captured_depths(monkeypatch):
     monkeypatch.setattr(tm_config, 'save_last_selected_insert', lambda *a, **k: None)
     monkeypatch.setattr(tm_config, 'save_checkbox_states', lambda *a, **k: None)
     monkeypatch.setattr(tm_config, 'save_settings', lambda *a, **k: None)
+    monkeypatch.setattr(tm_config, 'save_grip_ridge_insert', lambda *a, **k: None)
     # Geometry that needs a live Fusion document
     monkeypatch.setattr(tm_execute, 'create_grip_ridge_sketch', lambda *a, **k: MagicMock())
     monkeypatch.setattr(tm_execute, 'findProfileForCircle', lambda *a, **k: MagicMock())
@@ -122,8 +123,8 @@ class TestGripRidgeDepth:
         assert captured_depths == [pytest.approx(0.7)] * 3
 
     def test_spinner_override_applies_to_every_point(self, captured_depths):
-        """A 12mm override on the spinner (1.2 cm internally) on all 3 holes."""
-        args, _ = build_args('M3 Grip', point_count=3, spinner_value_cm=1.2)
+        """A 12 mm override on the depth spinner, on all 3 holes."""
+        args, _ = build_args('M3 Grip', point_count=3, spinner_value_mm=12.0)
 
         CommandExecuteHandler().notify(args)
 

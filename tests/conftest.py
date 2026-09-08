@@ -77,3 +77,77 @@ def debug_log(msg):
     if tm_state.CONFIG.get('enable_logging', False):
         print(msg)
 tm_helpers.log = debug_log
+
+
+# --- Shared fixtures -------------------------------------------------------
+import io as _io
+
+import pytest
+
+SAMPLE_CONFIG = """[Settings]
+chamfer_size = 0.5
+blind_hole_extra_depth = 1.0
+bottom_radius_size = 0.5
+grip_chamfer_angle = 78
+
+[Inserts]
+M3 x 5.7mm (standard) = 4.4, 5.7, 1.6
+M4 x 8.1mm (standard) = 5.6, 8.1, 2.0
+
+[GripRidgeInserts]
+# Format: clearance_dia, hole_depth, grip_edge_chamfer, grip_ridge_dia, grip_arc_distance, grip_count
+M3 Grip = 3.2, 7, 0.28, 1.5, 2.05, 3
+
+[UI State]
+chamfer_enabled_default = True
+bottom_radius_enabled_default = True
+show_success_message = False
+hole_type_blind = True
+last_selected_insert = M3 x 5.7mm (standard)
+
+[Developer]
+enable_logging = False
+enable_debug_export = False
+"""
+
+
+@pytest.fixture
+def config_file(tmp_path):
+    """A throwaway config.ini with one insert, one grip insert and a comment."""
+    path = tmp_path / 'config.ini'
+    _io.open(str(path), 'w', encoding='utf-8', newline='\n').write(SAMPLE_CONFIG)
+    return str(path)
+
+
+class RecordingInputs:
+    """Minimal stand-in for Fusion's CommandInputs that records what was added."""
+
+    def __init__(self):
+        self.spinners = {}
+        self.integers = {}
+        self.bools = {}
+        self.groups = {}
+
+    def addGroupCommandInput(self, input_id, name):
+        group = MagicMock()
+        group.children = self
+        self.groups[input_id] = name
+        return group
+
+    def addFloatSpinnerCommandInput(self, input_id, name, unit, minimum,
+                                    maximum, step, initial):
+        self.spinners[input_id] = {'name': name, 'unit': unit, 'min': minimum,
+                                   'max': maximum, 'step': step, 'initial': initial}
+
+    def addIntegerSpinnerCommandInput(self, input_id, name, minimum, maximum,
+                                      step, initial):
+        self.integers[input_id] = {'name': name, 'min': minimum, 'max': maximum,
+                                   'step': step, 'initial': initial}
+
+    def addBoolValueInput(self, input_id, name, _has_icon, _folder, initial):
+        self.bools[input_id] = {'name': name, 'initial': initial}
+
+
+@pytest.fixture
+def recording_inputs():
+    return RecordingInputs()

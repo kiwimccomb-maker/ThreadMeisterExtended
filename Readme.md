@@ -32,6 +32,8 @@
 * **User-friendly interface** - Button in SOLID > MODIFY menu with intuitive dialog
 * **Fully customizable** - All dimensions, chamfers, and grip ridge parameters editable via `config.ini`
 * **In-dialog Settings** - Change the design parameters without leaving Fusion; they apply to the holes you are about to cut and are saved back to `config.ini`
+* **Editable grip ridge geometry** - Ridge count, diameter, distance from centre, depth, chamfer and clearance are all tunable per insert straight from the dialog
+* **Restore Defaults** - Put the settings, or one grip insert, back to the shipped values without hunting through `config.ini`
 
 <br>
 
@@ -125,8 +127,9 @@ git clone https://github.com/kiwimccomb/ThreadMeisterExtended.git ThreadMeisterE
 6. Choose your **insert size** (e.g., M3 x 5.7mm standard, or M3 Grip)
 7. Choose **Blind Hole** or **Through Hole**
 8. Enable/disable top **chamfer** and bottom **fillet** (recommended: enabled)
-9. Optionally open **Settings** to adjust chamfer size, depths and the grip chamfer angle
-10. Click **OK**
+9. For a Grip insert, adjust the **Grip Ridge Parameters** (ridge count, diameter, distance, depth, chamfer, clearance)
+10. Optionally open **Settings** to adjust chamfer size, depths and the grip chamfer angle
+11. Click **OK**
 
 ### Standard Insert Specifications
 
@@ -191,14 +194,55 @@ that click of **OK**, and are written back to `config.ini` so they stick.
 | Show Success Message | `show_success_message` | `[UI State]` | on / off |
 | Enable Logging | `enable_logging` | `[Developer]` | on / off |
 
+**Restore Defaults** at the bottom of the group puts all six back to the shipped
+values. It acts immediately so you can see the result, and clears its own tick.
+
 The info panel updates live as you change the chamfer size, extra depth or grip
 chamfer angle, so you can see the resulting hole depth before committing.
 
 Cancelling the dialog changes nothing — settings are only saved on **OK**.
 
-The insert tables (`[Inserts]`, `[GripRidgeInserts]`) are still edited in
-`config.ini`; the grip ridge hole depth is the exception and has its own spinner
-in the dialog whenever a Grip insert is selected.
+### Grip Ridge Parameters
+
+Selecting any Grip insert reveals a **Grip Ridge Parameters** group holding that
+insert's full `[GripRidgeInserts]` row. Change the ridges, cut the holes, and the
+row is written back to `config.ini` under that insert's name — so the next time
+you pick, say, **M3 Grip**, your values are already there.
+
+| Parameter | Config field | Range |
+|----|----|----|
+| Clearance Diameter (mm) | `clearance_dia` | 0.1 – 50 |
+| Hole Depth (mm) | `hole_depth` | 0.1 – 100 |
+| Ridge Chamfer (mm) | `grip_edge_chamfer` | 0.0 – 5.0 |
+| Ridge Diameter (mm) | `grip_ridge_dia` | 0.1 – 20 |
+| Ridge Distance from Centre (mm) | `grip_arc_distance` | 0.1 – 50 |
+| Number of Ridges | `grip_count` | 1 – 12 |
+
+Switching to a different Grip insert reloads the group from that insert's row, so
+each size keeps its own numbers.
+
+**Restore Defaults** in this group puts the *selected* insert back to its shipped
+row — the other sizes are left alone. For an insert you added yourself there is no
+shipped row, so it restores the values saved in `config.ini` instead.
+
+Neither Restore Defaults writes anything on its own: the reset values are only
+saved when you click **OK**, so **Cancel** undoes it.
+
+Not every combination produces a ridge — each ridge circle has to actually cross
+the bore wall, and the ridges must not run into each other. The info panel warns
+you when they do not:
+
+* *Ridges sit outside the bore* — the ridge distance is too large (or the ridge diameter too small) for any of it to reach the bore.
+* *Ridges swallow the bore wall* — the ridge circle is entirely inside the bore, so there is no wall left to bite into.
+* *N ridges overlap each other* — too many ridges for that diameter and distance; they merge into a ring instead of separate ridges.
+
+The warning is advisory — **OK** still works, in case you want the geometry anyway.
+
+The standard `[Inserts]` table is still edited in `config.ini`.
+
+To reset *everything*, including any inserts you added, delete `config.ini` from
+the add-in folder — ThreadMeister writes a fresh default one the next time it
+loads.
 
 ## Screenshots
 
