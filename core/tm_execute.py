@@ -33,6 +33,11 @@ def sketch_plane_of(parentSketch):
     about it. Rolling the timeline back here is not the answer: features created while
     rolled back land before the ones that consumed the face, which can break them. So
     the cause is named and the caller skips that point.
+
+    The caller reads every plane before it cuts anything, so by the time this fires the
+    culprit can only be a feature that was already in the timeline -- which is what
+    makes "roll the timeline back" sound advice. It was not, while the add-in's own
+    first cut could consume the face midway through a run.
     """
     try:
         return parentSketch.referencePlane
@@ -44,6 +49,28 @@ def sketch_plane_of(parentSketch):
             'has changed, so Fusion will not reopen it from the end of the timeline. '
             'Roll the timeline back to just after that sketch and run this again, or '
             'put the sketch on a construction plane, which nothing can consume.') from e
+
+
+def summarise_failures(failures):
+    """Render [(point_number, reason)] as one line per distinct reason.
+
+    A reason that belongs to the sketch rather than the point -- a face a later
+    feature has changed, say -- fails every point selected in that sketch. Saying
+    it once with the points listed beats repeating the paragraph N times. Reasons
+    keep the order they first occurred in.
+    """
+    by_reason = {}
+    for point_number, reason in failures:
+        by_reason.setdefault(reason, []).append(point_number)
+
+    lines = []
+    for reason, points in by_reason.items():
+        if len(points) == 1:
+            label = f'Point {points[0]}'
+        else:
+            label = 'Points ' + ', '.join(str(p) for p in points)
+        lines.append(f'{label}: {reason}')
+    return '\n'.join(lines)
 
 
 class CommandExecuteHandler(adsk.core.CommandEventHandler):
@@ -96,7 +123,7 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
 
             successCount = 0
             failedCount = 0
-            failMessages = []
+            failures = []   # (point_number, reason)
 
             component = targetBody.parentComponent
             design = component.parentDesign
@@ -108,19 +135,29 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                 if timeline:
                     startIndex = timeline.markerPosition
 
+            # --- Pass 1: every sketch, while the face is still there -------------
+            # Fusion will not create a sketch on a model face that a feature has
+            # since reshaped, and the first hole reshapes the face the user's own
+            # sketch sits on. Acquiring the plane inside the cutting loop therefore
+            # worked for the first point and failed for all the rest, and rolling
+            # the timeline back could never fix it because the add-in consumed the
+            # face again on its own first cut.
+            #
+            # Measuring here is a bonus: direction and through-depth come off the
+            # pristine body instead of one already part-full of holes.
+            prepared = []
             for point_idx, point in enumerate(selectedPoints):
                 parentSketch = point.parentSketch
                 center2d = point.geometry
 
-                # Create clean sketch without auto-projected body edges
                 try:
                     face = sketch_plane_of(parentSketch)
                 except RuntimeError as e:
-                    # One unusable point should not throw away the holes that worked, or
-                    # the ones after it. The loop already counts and reports failures.
                     failedCount += 1
-                    failMessages.append(f'Point {point_idx+1}: {e}')
+                    failures.append((point_idx + 1, str(e)))
                     continue
+
+                # Clean sketch without auto-projected body edges
                 tempSketch = component.sketches.addWithoutEdges(face)
                 tempSketch.name = f"TM_{insertName}_P{point_idx+1}"
 
@@ -128,6 +165,7 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                 projectedEntities = tempSketch.project(point)
                 projectedPoint = projectedEntities.item(0)
 
+                circle = None
                 if is_grip_ridge:
                     profile_or_collection = create_grip_ridge_sketch(
                         tempSketch, projectedPoint.geometry, clearanceDia,
@@ -136,25 +174,23 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                         grip_count=gripCount)
                     if profile_or_collection is None:
                         failedCount += 1
-                        failMessages.append(
-                            f'Point {point_idx+1}: Could not create grip-ridge profile.')
+                        failures.append(
+                            (point_idx + 1, 'Could not create grip-ridge profile.'))
                         tempSketch.deleteMe()
                         continue
                 else:
                     radius = holeDia / 2.0 / 10.0   # mm -> cm
 
-                    # Create bore circle in clean sketch
                     circle = tempSketch.sketchCurves.sketchCircles.addByCenterRadius(
                         projectedPoint.geometry, radius)
-                    tempConstraints = tempSketch.geometricConstraints
-                    tempConstraints.addCoincident(circle.centerSketchPoint, projectedPoint)
+                    tempSketch.geometricConstraints.addCoincident(
+                        circle.centerSketchPoint, projectedPoint)
 
                     profile_or_collection = findProfileForCircle(tempSketch, circle)
-
                     if profile_or_collection is None:
                         failedCount += 1
-                        failMessages.append(
-                            f'Point {point_idx+1}: Could not create bore profile.')
+                        failures.append(
+                            (point_idx + 1, 'Could not create bore profile.'))
                         tempSketch.deleteMe()
                         continue
 
@@ -165,16 +201,15 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                         export_dir = os.path.join(
                             os.path.dirname(os.path.dirname(__file__)), 'debug_exports')
                         os.makedirs(export_dir, exist_ok=True)
-                        target_circle = None
+                        target_circle = circle
                         if is_grip_ridge:
+                            target_circle = None
                             for circle_candidate in tempSketch.sketchCurves.sketchCircles:
                                 if circle_candidate.centerSketchPoint.geometry.distanceTo(projectedPoint.geometry) < 1e-6:
                                     target_circle = circle_candidate
                                     break
                             if target_circle is None:
                                 tm_helpers.log(f'Grip-ridge debug export skipped: central circle not found for point {point_idx+1}')
-                        else:
-                            target_circle = circle
 
                         if target_circle is not None:
                             export_sketch_data(
@@ -188,12 +223,12 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
 
                 if direction is None:
                     failedCount += 1
-                    failMessages.append(f'Point {point_idx+1}: Could not determine extrusion direction. Ensure the sketch is on a planar face of the target body.')
+                    failures.append((
+                        point_idx + 1,
+                        'Could not determine extrusion direction. Ensure the sketch '
+                        'is on a planar face of the target body.'))
                     tempSketch.deleteMe()
                     continue
-
-                extrudes = component.features.extrudeFeatures
-                extInput = extrudes.createInput(profile_or_collection, adsk.fusion.FeatureOperations.CutFeatureOperation)
 
                 if isBlindHole:
                     if is_grip_ridge:
@@ -203,15 +238,31 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                         chamfer = tm_state.CONFIG['chamfer_size'] if includeChamfer else 0.0
                         depth_mm = calc_blind_hole_depth_mm(
                             insertLen, tm_state.CONFIG['blind_hole_extra_depth'], chamfer)
-                    dist = adsk.core.ValueInput.createByReal(depth_mm / 10.0)  # mm -> cm
-                    extent = adsk.fusion.DistanceExtentDefinition.create(dist)
-                    extInput.setOneSideExtent(extent, direction)
+                    depth_cm = depth_mm / 10.0   # mm -> cm
                 else:
-                    throughDistance = findDistanceThroughBody(parentSketch, center2d, targetBody, direction)
-                    dist = adsk.core.ValueInput.createByReal(throughDistance)
-                    extent = adsk.fusion.DistanceExtentDefinition.create(dist)
-                    extInput.setOneSideExtent(extent, direction)
+                    depth_cm = findDistanceThroughBody(
+                        parentSketch, center2d, targetBody, direction)
 
+                prepared.append({
+                    'point_no': point_idx + 1,
+                    'center2d': center2d,
+                    'parentSketch': parentSketch,
+                    'tempSketch': tempSketch,
+                    'projectedPoint': projectedPoint,
+                    'profile': profile_or_collection,
+                    'direction': direction,
+                    'depth_cm': depth_cm,
+                })
+
+            # --- Pass 2: cut, then chamfer and fillet ----------------------------
+            extrudes = component.features.extrudeFeatures
+
+            for item in prepared:
+                extInput = extrudes.createInput(
+                    item['profile'], adsk.fusion.FeatureOperations.CutFeatureOperation)
+                dist = adsk.core.ValueInput.createByReal(item['depth_cm'])
+                extent = adsk.fusion.DistanceExtentDefinition.create(dist)
+                extInput.setOneSideExtent(extent, item['direction'])
                 extInput.participantBodies = [targetBody]
                 extrude = extrudes.add(extInput)
 
@@ -220,7 +271,8 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                         # Grip-ridge: chamfer grip ridge arcs with the insert-specific chamfer size.
                         grip_chamfer_angle = tm_state.CONFIG.get('grip_chamfer_angle', 78)
                         gripEdges = getGripRidgeChamferEdges(
-                            extrude, targetBody, tempSketch, projectedPoint.geometry,
+                            extrude, targetBody, item['tempSketch'],
+                            item['projectedPoint'].geometry,
                             grip_ridge_dia_mm=gripRidgeDia,
                             grip_arc_distance_mm=gripArcDistance,
                             grip_count=gripCount)
@@ -230,14 +282,16 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                                 gripChamferSize, grip_chamfer_angle)
                     else:
                         # Standard: single 45° equal-distance chamfer
-                        chamferEdge = findChamferEdge(extrude, targetBody, parentSketch, center2d, diameter)
+                        chamferEdge = findChamferEdge(
+                            extrude, targetBody, item['parentSketch'],
+                            item['center2d'], diameter)
                         if chamferEdge:
                             addChamferToEdge(component, chamferEdge, tm_state.CONFIG['chamfer_size'])
 
                 if includeBottomRadius:
                     addBottomRadiusToBlindHole(
-                        component, extrude, targetBody, parentSketch, center2d,
-                        diameter, tm_state.CONFIG['bottom_radius_size']
+                        component, extrude, targetBody, item['parentSketch'],
+                        item['center2d'], diameter, tm_state.CONFIG['bottom_radius_size']
                     )
 
                 successCount += 1
@@ -252,7 +306,7 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                     tm_helpers.log(f'Timeline grouping failed: {e}')
 
             if failedCount > 0:
-                details = '\n'.join(failMessages)
+                details = summarise_failures(failures)
                 tm_state._ui.messageBox(
                     f'Created {successCount} insert hole(s), {failedCount} failed.\n\n{details}'
                 )
