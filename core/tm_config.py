@@ -376,6 +376,22 @@ def save_last_selected_insert(insert_name, config_file=None):
     return save_values({'UI State': {'last_selected_insert': insert_name}}, config_file)
 
 
+HOLE_TYPE_LABELS = ('Blind Hole', 'Through Hole')
+
+
+def read_hole_type(inputs):
+    """True for a blind hole, read off the dialog's radio group.
+
+    The control is the source of truth. CONFIG is only the fallback for callers
+    that run before the dialog is built, and the remembered choice the next one
+    opens on.
+    """
+    group = inputs.itemById('holeType')
+    if group and group.selectedItem:
+        return group.selectedItem.name == HOLE_TYPE_LABELS[0]
+    return tm_state.CONFIG.get('hole_type_blind', True)
+
+
 def save_checkbox_states(chamfer_state, radius_state, show_message_state, is_blind_hole, config_file=None):
     """Persist UI checkbox states and hole type to config.ini."""
     return save_values({'UI State': {

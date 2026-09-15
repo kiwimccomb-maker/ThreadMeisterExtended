@@ -195,7 +195,7 @@ class TestItBuilds:
 
     def test_every_input_the_rest_of_the_code_looks_up_exists(self, grip_dialog):
         expected = {'bodySelect', 'pointSelect', 'insertType', 'insertSize',
-                    'holeBlind', 'holeThrough', 'addChamfer', 'addBottomRadius',
+                    'holeType', 'addChamfer', 'addBottomRadius',
                     'infoText'}
         expected |= set(tm_config.SETTINGS_INPUTS)
         expected |= set(tm_config.GRIP_RIDGE_INPUTS)
@@ -211,7 +211,7 @@ class TestItBuilds:
                           encoding='utf-8').read()
                   + io.open(os.path.join(HERE, '..', 'core', 'tm_execute.py'),
                             encoding='utf-8').read())
-        in_tables = {'holeBlind', 'holeThrough'} | set(tm_ui.ACTION_BUTTONS)
+        in_tables = set(tm_ui.ACTION_BUTTONS)
 
         for input_id in sorted(in_tables):
             assert f"itemById('{input_id}')" not in source, (
@@ -425,84 +425,89 @@ class TestIcons:
 
 
 class TestHoleType:
-    """Two labelled buttons on one row, like the action buttons. Buttons because
-    the options are mutually exclusive, and because a bool input in a table cell
-    only draws its name when it is a button."""
+    """Two labelled, mutually exclusive options that show which one is in force.
 
-    def buttons(self, dialog):
-        return (dialog.cell('holeBlind'), dialog.cell('holeThrough'))
+    Not two buttons: Fusion will not rename a live input, so a button has
+    nowhere to say it is the chosen one, and greying it instead read as
+    unavailable and could not be clicked.
+    """
 
-    def test_they_are_buttons_not_checkboxes(self, heat_dialog):
-        for button in self.buttons(heat_dialog):
-            assert button.kind == 'button', 'a checkbox would drop its label'
+    def test_it_is_a_radio_group(self, heat_dialog):
+        assert heat_dialog.itemById('holeType').kind == 'radio'
 
-    def test_they_share_one_row(self, heat_dialog):
-        table = heat_dialog.itemById('holeTypeRow')
+    def test_the_code_can_find_it(self, heat_dialog):
+        """A table would hide it from itemById, which is how the last two
+        pickers shipped broken."""
+        assert heat_dialog.itemById('holeType') is not None
 
-        assert table.kind == 'table'
-        assert sorted(table.cells, key=lambda c: c[2]) == [
-            ('holeBlind', 0, 0), ('holeThrough', 0, 1)]
+    def test_each_option_says_what_it_is(self, heat_dialog):
+        group = heat_dialog.itemById('holeType')
 
-    def test_each_button_says_what_it_is(self, heat_dialog):
-        said = [button.spec['name'] for button in self.buttons(heat_dialog)]
+        assert [group.listItems.item(i).name
+                for i in range(group.listItems.count)] == list(
+                    tm_ui.HOLE_TYPE_LABELS)
 
-        assert [text.replace(tm_ui.CHOSEN_MARK, '') for text in said] == \
-            list(tm_ui.HOLE_TYPE_LABELS)
+    def test_exactly_one_is_chosen(self, heat_dialog):
+        group = heat_dialog.itemById('holeType')
+        chosen = [group.listItems.item(i).isSelected
+                  for i in range(group.listItems.count)]
 
-    def test_they_are_outlined_like_the_action_buttons(self, heat_dialog):
-        assert heat_dialog.itemById('holeTypeRow').tablePresentationStyle is \
-            adsk.core.TablePresentationStyles.itemBorderTablePresentationStyle
-
-    def test_no_button_is_left_pressed(self, heat_dialog):
-        for button in self.buttons(heat_dialog):
-            assert button.value is False
+        assert sum(chosen) == 1, 'mutually exclusive'
 
 
 class TestHoleTypeChoice:
-    """One of the two is always in force, marked on its own label, and mirrored
-    into CONFIG for everything that cannot look the buttons up."""
+    """Whichever is chosen is mirrored into CONFIG, which is what the cut reads."""
 
-    def buttons(self, dialog):
-        return (dialog.cell('holeBlind'), dialog.cell('holeThrough'))
+    def choose(self, dialog, label):
+        group = dialog.itemById('holeType')
+        for i in range(group.listItems.count):
+            item = group.listItems.item(i)
+            item.isSelected = (item.name == label)
 
     def test_it_opens_on_the_remembered_choice(self, heat_dialog):
-        blind, through = self.buttons(heat_dialog)
+        group = heat_dialog.itemById('holeType')
 
-        assert blind.name.startswith(tm_ui.CHOSEN_MARK)
-        assert not through.name.startswith(tm_ui.CHOSEN_MARK)
+        assert group.selectedItem.name == tm_ui.HOLE_TYPE_LABELS[0]
+        assert tm_state.CONFIG['hole_type_blind'] is True
 
-    def test_pressing_through_chooses_it(self, heat_dialog):
-        buttons = self.buttons(heat_dialog)
+    def test_choosing_through_turns_blind_off(self, heat_dialog):
+        self.choose(heat_dialog, tm_ui.HOLE_TYPE_LABELS[1])
 
-        tm_ui._holeTypeChanged(buttons, buttons[1])
+        tm_ui._holeTypeChanged(heat_dialog)
 
         assert tm_state.CONFIG['hole_type_blind'] is False
 
-    def test_the_chosen_one_is_marked_and_the_other_is_not(self, heat_dialog):
-        blind, through = self.buttons(heat_dialog)
+    def test_choosing_blind_turns_it_back_on(self, heat_dialog):
+        self.choose(heat_dialog, tm_ui.HOLE_TYPE_LABELS[1])
+        tm_ui._holeTypeChanged(heat_dialog)
 
-        tm_ui._holeTypeChanged((blind, through), through)
+        self.choose(heat_dialog, tm_ui.HOLE_TYPE_LABELS[0])
+        tm_ui._holeTypeChanged(heat_dialog)
 
-        assert through.name.startswith(tm_ui.CHOSEN_MARK)
-        assert not blind.name.startswith(tm_ui.CHOSEN_MARK)
+        assert tm_state.CONFIG['hole_type_blind'] is True
 
-    def test_only_ever_one_is_marked(self, heat_dialog):
-        buttons = self.buttons(heat_dialog)
+    def test_the_cut_follows_the_control_not_a_stale_mirror(self, heat_dialog,
+                                                            monkeypatch):
+        """CONFIG used to be kept in step by the InputChanged event. When that
+        fired for a button nobody pressed, the cut came out the hole type the
+        dialog was not showing."""
+        self.choose(heat_dialog, tm_ui.HOLE_TYPE_LABELS[0])
+        monkeypatch.setitem(tm_state.CONFIG, 'hole_type_blind', False)
 
-        for pressed in (buttons[1], buttons[0], buttons[1]):
-            tm_ui._holeTypeChanged(buttons, pressed)
-            marked = [b.name.startswith(tm_ui.CHOSEN_MARK) for b in buttons]
-            assert sum(marked) == 1, 'mutually exclusive'
+        assert tm_config.read_hole_type(heat_dialog) is True
 
-    def test_the_button_does_not_stay_pressed(self, heat_dialog):
-        buttons = self.buttons(heat_dialog)
+    def test_it_falls_back_to_the_remembered_choice_before_the_dialog_exists(
+            self, monkeypatch):
+        monkeypatch.setitem(tm_state.CONFIG, 'hole_type_blind', False)
 
-        tm_ui._holeTypeChanged(buttons, buttons[1])
+        assert tm_config.read_hole_type(Inputs()) is False
 
-        assert buttons[1].value is False
+    def test_it_opens_on_through_when_that_was_last_used(self, monkeypatch):
+        """The last hole type used is remembered in config.ini, so the dialog
+        has to come back up on it rather than resetting to blind."""
+        monkeypatch.setitem(tm_state.CONFIG, 'hole_type_blind', True)
 
-    def test_it_ignores_anything_that_is_not_one_of_the_pair(self, heat_dialog):
-        handled = tm_ui._holeTypeChanged(self.buttons(heat_dialog),
-                                         heat_dialog.itemById('addChamfer'))
+        group = tm_ui._addHoleTypeInput(Inputs(), blind_first=False)
 
-        assert handled is False
+        assert group.selectedItem.name == tm_ui.HOLE_TYPE_LABELS[1]
+        assert tm_state.CONFIG['hole_type_blind'] is False

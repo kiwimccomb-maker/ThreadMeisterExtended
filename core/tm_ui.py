@@ -16,10 +16,7 @@ from tm_execute import CommandExecuteHandler
 INSERT_TYPE_HEAT = 'Heat-Set Insert'
 INSERT_TYPE_GRIP = 'Grip Ridge'
 
-# Hole type, and how the one in force is marked. A button cannot look pressed,
-# so its label says so.
-HOLE_TYPE_LABELS = ('Blind Hole', 'Through Hole')
-CHOSEN_MARK = '\u2713 '
+from tm_config import HOLE_TYPE_LABELS
 
 # Fusion sizes the label column to the widest label and hands whatever is left to
 # the value box, with no ratio to set anywhere. Padding the labels is the lever:
@@ -134,8 +131,7 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             _fillInsertDropdown(insertDropdown, isGrip, lastSelected)
             lastSelected = _selectedName(insertDropdown) or lastSelected
 
-            # One bordered row, the same shape as the action buttons
-            onInputChanged.holeToggles = _addHoleTypeRow(
+            _addHoleTypeInput(
                 inputs, tm_state.CONFIG.get('hole_type_blind', True))
 
             _addHeatInsertGroup(inputs, not isGrip)
@@ -160,10 +156,6 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
 
 
 class InputChangedHandler(adsk.core.InputChangedEventHandler):
-    # Set by CommandCreatedHandler once the row exists. Held rather than looked
-    # up because itemById does not reach inside a table.
-    holeToggles = ()
-
     def notify(self, args):
         try:
             changedInput = args.input
@@ -183,8 +175,8 @@ class InputChangedHandler(adsk.core.InputChangedEventHandler):
                         pointSelect.isEnabled = True
                         pointSelect.hasFocus = True
 
-            if _holeTypeChanged(self.holeToggles, changedInput):
-                changedId = 'holeType'
+            if changedId == 'holeType':
+                _holeTypeChanged(inputs)
 
             # Switching family refills the size list and swaps the visible group
             if changedId == 'insertType':
@@ -301,81 +293,25 @@ def _typeName(is_grip):
     return INSERT_TYPE_GRIP if is_grip else INSERT_TYPE_HEAT
 
 
-def _addHoleTypeRow(inputs, blind_first):
-    """Blind and Through as two labelled buttons on one row.
+def _addHoleTypeInput(inputs, blind_first):
+    """Blind or Through: two labelled options, one in force, always visible.
 
-    Buttons, not checkboxes: the two are mutually exclusive, and a bool input in
-    a table cell draws its name only when it is a button. As a checkbox it draws
-    the box and the name goes nowhere, which is how they ended up unlabelled.
-
-    A button cannot show which one is in force, so the chosen one is marked in
-    its label by _showHoleType.
-
-    Returns the pair. The caller has to keep them: an input created inside a
-    table is not found by itemById on the command's inputs, so a lookup would
-    quietly return nothing and the choice would never take effect.
+    A radio group rather than two buttons. Fusion will not rename a live input,
+    so a button has nowhere to show that it is the chosen one, and the only
+    fallback - greying it - reads as unavailable and cannot be clicked.
     """
-    options = (('holeBlind', HOLE_TYPE_LABELS[0],
-                'Stops at the depth worked out from the insert and the settings '
-                'below.'),
-               ('holeThrough', HOLE_TYPE_LABELS[1],
-                'Cuts all the way through the body.'))
-    ratio = ':'.join(str(len(label) + 14) for _id, label, _tip in options)
-
-    def build(collection):
-        made = []
-        for input_id, label, tip in options:
-            button = collection.addBoolValueInput(input_id, label, False, '', False)
-            button.tooltip = tip
-            made.append(button)
-        return made
-
-    try:
-        table = inputs.addTableCommandInput('holeTypeRow', 'Hole Type', 2, ratio)
-        table.minimumVisibleRows = 1
-        table.maximumVisibleRows = 1
-        table.hasGrid = False
-        table.tablePresentationStyle = \
-            adsk.core.TablePresentationStyles.itemBorderTablePresentationStyle
-        buttons = build(table.commandInputs)
-        for column, button in enumerate(buttons):
-            table.addCommandInput(button, 0, column)
-    except Exception:
-        existing = inputs.itemById('holeTypeRow')
-        if existing:
-            existing.deleteMe()
-        buttons = build(inputs)
-
+    group = inputs.addRadioButtonGroupCommandInput('holeType', 'Hole Type')
+    group.listItems.add(HOLE_TYPE_LABELS[0], bool(blind_first))
+    group.listItems.add(HOLE_TYPE_LABELS[1], not blind_first)
+    group.tooltip = ('Blind stops at the depth worked out from the insert and '
+                     'the settings below. Through cuts out the far side.')
     tm_state.CONFIG['hole_type_blind'] = bool(blind_first)
-    _showHoleType(tuple(buttons))
-    return tuple(buttons)
+    return group
 
 
-def _showHoleType(buttons):
-    """Mark whichever hole type is in force.
-
-    Renaming says it plainly. If a build will not rename an input, grey the
-    chosen one instead, so there is still some sign of which one is set.
-    """
-    if not buttons or len(buttons) != 2:
-        return
-    is_blind = tm_state.CONFIG.get('hole_type_blind', True)
-    for button, label, chosen in zip(buttons, HOLE_TYPE_LABELS,
-                                     (is_blind, not is_blind)):
-        try:
-            button.name = (CHOSEN_MARK + label) if chosen else label
-        except Exception:
-            button.isEnabled = not chosen
-
-
-def _holeTypeChanged(buttons, changed):
-    """Pressing either button chooses it. Says whether it was one of them."""
-    if not buttons or changed not in buttons:
-        return False
-    tm_state.CONFIG['hole_type_blind'] = changed is buttons[0]
-    changed.value = False          # release it; it is a button, not a setting
-    _showHoleType(buttons)
-    return True
+def _holeTypeChanged(inputs):
+    """Remember the choice, so the next dialog opens on it."""
+    tm_state.CONFIG['hole_type_blind'] = tm_config.read_hole_type(inputs)
 
 
 def _addActionButtons(children, prefix, actions=ACTIONS):
@@ -592,7 +528,7 @@ def _runAction(inputs, action_id):
             _valueOf(inputs, 'addChamfer', True),
             _valueOf(inputs, 'addBottomRadius', False),
             _valueOf(inputs, 'setShowMessage', True),
-            tm_state.CONFIG.get('hole_type_blind', True))
+            tm_config.read_hole_type(inputs))
 
     elif action_id == 'gripRestoreDefaults':
         spec = tm_config.default_grip_spec(insertName)
@@ -625,7 +561,7 @@ def updateInfoText(inputs):
         infoText = inputs.itemById('infoText')
 
         insertName = insertSize.selectedItem.name
-        isBlindHole = tm_state.CONFIG.get('hole_type_blind', True)
+        isBlindHole = tm_config.read_hole_type(inputs)
 
         # Live values from the Settings group (CONFIG values until it is built)
         settings = tm_config.read_settings_inputs(inputs)
