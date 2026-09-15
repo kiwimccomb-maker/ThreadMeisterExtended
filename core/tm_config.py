@@ -491,6 +491,35 @@ def default_grip_spec(insert_name):
         insert_name, tm_state.GRIP_RIDGE_INSERTS.get(insert_name))
 
 
+# Two-option pickers, each drawn as one row of labelled toggles. Kept here
+# because tm_execute reads them too and cannot import tm_ui.
+HOLE_TYPE_INPUTS = ('holeBlind', 'holeThrough')
+INSERT_TYPE_INPUTS = ('typeHeat', 'typeGrip')
+
+
+def _first_is_on(inputs, pair, default=True):
+    """Which of a two-toggle pair is on, falling back when neither is built."""
+    first = inputs.itemById(pair[0])
+    second = inputs.itemById(pair[1])
+    if first is None and second is None:
+        return default
+    if first is not None and first.value:
+        return True
+    if second is not None and second.value:
+        return False
+    return default
+
+
+def is_blind_hole(inputs, default=True):
+    """True for a blind hole, False for a through hole."""
+    return _first_is_on(inputs, HOLE_TYPE_INPUTS, default)
+
+
+def is_heat_insert(inputs, default=True):
+    """True for the heat-set family, False for grip ridges."""
+    return _first_is_on(inputs, INSERT_TYPE_INPUTS, default)
+
+
 def read_settings_inputs(inputs):
     """Read the Settings group back as {CONFIG key: value}.
 

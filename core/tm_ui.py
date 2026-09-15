@@ -47,6 +47,8 @@ ACTION_BUTTONS = (
 # Anything that changes what the info panel should say
 REFRESH_INFO_ON = (
     ('insertType', 'insertSize', 'holeType', 'addChamfer')
+    + tm_config.HOLE_TYPE_INPUTS
+    + tm_config.INSERT_TYPE_INPUTS
     + tuple(tm_config.SETTINGS_INPUTS)
     + tm_config.GRIP_RIDGE_INPUTS
     + ACTION_BUTTONS
@@ -69,7 +71,7 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
                 # Fusion sizes the label column to the longest label and gives the
                 # rest to the value box, so a narrower dialog is what stops the
                 # spinners running on for half the width.
-                cmd.setDialogInitialSize(340, 560)
+                cmd.setDialogInitialSize(320, 560)
             except Exception:
                 pass
 
@@ -105,7 +107,15 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             # decides both the size list and which parameter group is on screen.
             lastSelected = tm_state.CONFIG.get('last_selected_insert', '')
             isGrip = lastSelected in tm_state.GRIP_RIDGE_INSERTS
-            _addInsertTypeInput(inputs, isGrip)
+            _addToggleRow(
+                inputs, 'insertTypeRow', 'Insert Type',
+                tm_config.INSERT_TYPE_INPUTS,
+                (INSERT_TYPE_HEAT, INSERT_TYPE_GRIP),
+                first_is_on=not isGrip,
+                tooltips=(
+                    'A plain bore for an insert melted in with a soldering iron.',
+                    'Printed ridges a screw forms its own thread against, with no '
+                    'insert at all.'))
 
             # Insert size, refilled whenever the type changes
             insertDropdown = inputs.addDropDownCommandInput(
@@ -116,13 +126,15 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             _fillInsertDropdown(insertDropdown, isGrip, lastSelected)
             lastSelected = _selectedName(insertDropdown) or lastSelected
 
-            # Hole type. Mutually exclusive, and labelled rather than drawn:
-            # Fusion's side-by-side row shows icons only, and these two say more
-            # as words than any icon of them would.
-            holeType = inputs.addRadioButtonGroupCommandInput('holeType', 'Hole Type')
-            blindFirst = tm_state.CONFIG.get('hole_type_blind', True)
-            holeType.listItems.add('Blind Hole', blindFirst)
-            holeType.listItems.add('Through Hole', not blindFirst)
+            _addToggleRow(
+                inputs, 'holeTypeRow', 'Hole Type',
+                tm_config.HOLE_TYPE_INPUTS,
+                ('Blind Hole', 'Through Hole'),
+                first_is_on=tm_state.CONFIG.get('hole_type_blind', True),
+                tooltips=(
+                    'Stops at the depth worked out from the insert and the '
+                    'settings below.',
+                    'Cuts all the way through the body.'))
 
             _addHeatInsertGroup(inputs, not isGrip)
             _addGripRidgeGroup(inputs, lastSelected)
@@ -164,6 +176,12 @@ class InputChangedHandler(adsk.core.InputChangedEventHandler):
                     if pointSelect:
                         pointSelect.isEnabled = True
                         pointSelect.hasFocus = True
+
+            if _keepOneToggled(inputs, changedId, tm_config.HOLE_TYPE_INPUTS):
+                changedId = 'holeType'
+
+            if _keepOneToggled(inputs, changedId, tm_config.INSERT_TYPE_INPUTS):
+                changedId = 'insertType'
 
             # Switching family refills the size list and swaps the visible group
             if changedId == 'insertType':
@@ -230,7 +248,7 @@ def _selectedName(listInput):
 
 def _isGripSelected(inputs):
     """True when the Grip Ridge family is chosen."""
-    return _selectedName(inputs.itemById('insertType')) == INSERT_TYPE_GRIP
+    return not tm_config.is_heat_insert(inputs)
 
 
 def _fillInsertDropdown(dropdown, is_grip, preferred=None):
@@ -244,40 +262,61 @@ def _fillInsertDropdown(dropdown, is_grip, preferred=None):
         items.item(0).isSelected = True
 
 
-def _addInsertTypeInput(inputs, is_grip):
-    """Pick the insert family, showing each option's icon next to its name.
+def _addToggleRow(inputs, table_id, label, input_ids, labels,
+                  first_is_on, tooltips):
+    """A two-option picker as one visible row of labelled toggles.
 
-    A button row would be the obvious choice but it draws icons alone, with the
-    name only as hover text - which is why both buttons appeared to say the same
-    thing. A labelled-icon list is the control that shows an icon and a name
-    together. Falls back to a plain text list if the style is unavailable.
+    Always on screen rather than behind a dropdown, since there are only ever two
+    of them, and side by side rather than stacked. A table is what puts two
+    inputs on one line; its item borders are what make them read as buttons.
+
+    They are checkboxes because a button cannot show which option is currently
+    chosen, and the handler keeps exactly one of them ticked.
     """
-    items = ((INSERT_TYPE_HEAT, HEAT_ICONS), (INSERT_TYPE_GRIP, GRIP_ICONS))
     try:
-        picker = inputs.addDropDownCommandInput(
-            'insertType', 'Insert Type',
-            adsk.core.DropDownStyles.LabeledIconDropDownStyle)
-        for name, folder in items:
-            picker.listItems.add(name, name == _typeName(is_grip), folder)
+        table = inputs.addTableCommandInput(table_id, label, len(labels), '1:1')
+        table.minimumVisibleRows = 1
+        table.maximumVisibleRows = 1
+        table.hasGrid = False
+        table.tablePresentationStyle = \
+            adsk.core.TablePresentationStyles.itemBorderTablePresentationStyle
+        for column, (input_id, text, tip) in enumerate(
+                zip(input_ids, labels, tooltips)):
+            toggle = table.commandInputs.addBoolValueInput(
+                input_id, text, True, '', column == (0 if first_is_on else 1))
+            toggle.tooltip = tip
+            table.addCommandInput(toggle, 0, column)
+        return table
     except Exception:
-        existing = inputs.itemById('insertType')
+        existing = inputs.itemById(table_id)
         if existing:
             existing.deleteMe()
-        picker = inputs.addDropDownCommandInput(
-            'insertType', 'Insert Type',
-            adsk.core.DropDownStyles.TextListDropDownStyle)
-        for name, _folder in items:
-            picker.listItems.add(name, name == _typeName(is_grip))
-    picker.tooltip = (
-        'Heat-Set Insert: a plain bore for an insert melted in with a soldering '
-        'iron.\n'
-        'Grip Ridge: printed ridges a screw forms its own thread against, with no '
-        'insert at all.')
-    return picker
+        for column, (input_id, text, tip) in enumerate(
+                zip(input_ids, labels, tooltips)):
+            toggle = inputs.addBoolValueInput(
+                input_id, text, True, '', column == (0 if first_is_on else 1))
+            toggle.tooltip = tip
+        return None
 
 
-def _typeName(is_grip):
-    return INSERT_TYPE_GRIP if is_grip else INSERT_TYPE_HEAT
+def _keepOneToggled(inputs, changed_id, input_ids):
+    """Two toggles, exactly one on. Clicking either makes it the chosen one.
+
+    Unticking the one that is already on would leave neither chosen, so that puts
+    it straight back and turns the other off instead.
+    """
+    if changed_id not in input_ids:
+        return False
+    other_id = input_ids[1] if changed_id == input_ids[0] else input_ids[0]
+    changed = inputs.itemById(changed_id)
+    other = inputs.itemById(other_id)
+    if changed is None or other is None:
+        return True
+    if changed.value:
+        other.value = False
+    else:
+        changed.value = True
+    return True
 
 
 def _addActionButtons(children, prefix, actions=ACTIONS):
@@ -289,9 +328,10 @@ def _addActionButtons(children, prefix, actions=ACTIONS):
     fall back to exactly that, which is merely taller.
     """
     table_id = prefix + 'Actions'
-    # Columns in proportion to the label lengths, so the longest one is not the
-    # one that gets clipped.
-    ratio = ':'.join(str(max(len(label), 4)) for label, _suffix in actions)
+    # Columns in proportion to the label lengths plus a generous fixed margin.
+    # Sizing purely by length left Save with a column too narrow for the word,
+    # since the borders and padding cost the same whatever the label says.
+    ratio = ':'.join(str(len(label) + 14) for label, _suffix in actions)
     try:
         table = children.addTableCommandInput(table_id, '', len(actions), ratio)
         table.minimumVisibleRows = 1
@@ -523,11 +563,10 @@ def updateInfoText(inputs):
     """Refresh the info text box with specs for the currently selected insert."""
     try:
         insertSize = inputs.itemById('insertSize')
-        holeType = inputs.itemById('holeType')
         infoText = inputs.itemById('infoText')
 
         insertName = insertSize.selectedItem.name
-        isBlindHole = holeType.selectedItem.name == 'Blind Hole'
+        isBlindHole = tm_config.is_blind_hole(inputs)
 
         # Live values from the Settings group (CONFIG values until it is built)
         settings = tm_config.read_settings_inputs(inputs)

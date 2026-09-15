@@ -174,8 +174,10 @@ def grip_dialog(monkeypatch):
 class TestItBuilds:
 
     def test_every_input_the_rest_of_the_code_looks_up_exists(self, grip_dialog):
-        expected = {'bodySelect', 'pointSelect', 'insertType', 'insertSize',
-                    'holeType', 'addChamfer', 'addBottomRadius', 'infoText'}
+        expected = {'bodySelect', 'pointSelect', 'insertSize',
+                    'addChamfer', 'addBottomRadius', 'infoText'}
+        expected |= set(tm_config.INSERT_TYPE_INPUTS)
+        expected |= set(tm_config.HOLE_TYPE_INPUTS)
         expected |= set(tm_config.SETTINGS_INPUTS)
         expected |= set(tm_config.GRIP_RIDGE_INPUTS)
         expected |= set(tm_ui.ACTION_BUTTONS)
@@ -194,24 +196,34 @@ class TestItBuilds:
 class TestInsertTypeToggle:
 
     def test_the_toggle_offers_both_families(self, heat_dialog):
-        toggle = heat_dialog.itemById('insertType')
-        names = [toggle.listItems.item(i).name for i in range(toggle.listItems.count)]
+        names = [heat_dialog.itemById(i).spec['name']
+                 for i in tm_config.INSERT_TYPE_INPUTS]
 
         assert names == [tm_ui.INSERT_TYPE_HEAT, tm_ui.INSERT_TYPE_GRIP]
 
-    def test_each_family_shows_its_name_beside_its_icon(self, heat_dialog):
-        """A button row would have drawn the icons alone, with the name only on
-        hover - which is why both looked like they said the same thing."""
-        toggle = heat_dialog.itemById('insertType')
-        pairs = [(toggle.listItems.item(i).name, toggle.listItems.item(i).folder)
-                 for i in range(toggle.listItems.count)]
+    def test_both_options_are_on_screen_without_opening_anything(self, heat_dialog):
+        """Two options do not need a dropdown."""
+        for input_id in tm_config.INSERT_TYPE_INPUTS:
+            assert heat_dialog.itemById(input_id).isVisible
 
-        assert pairs == [(tm_ui.INSERT_TYPE_HEAT, tm_ui.HEAT_ICONS),
-                         (tm_ui.INSERT_TYPE_GRIP, tm_ui.GRIP_ICONS)]
+    def test_they_share_one_row(self, heat_dialog):
+        table = heat_dialog.itemById('insertTypeRow')
+        assert table.kind == 'table'
+        assert sorted(table.cells, key=lambda c: c[2]) == [
+            (input_id, 0, column)
+            for column, input_id in enumerate(tm_config.INSERT_TYPE_INPUTS)]
 
-    def test_the_tooltip_covers_both_families(self, heat_dialog):
-        said = heat_dialog.itemById('insertType').tooltip
-        assert tm_ui.INSERT_TYPE_HEAT in said and tm_ui.INSERT_TYPE_GRIP in said
+    def test_each_option_explains_only_itself(self, heat_dialog):
+        """One tooltip on the whole control said the same thing for both."""
+        heat, grip = (heat_dialog.itemById(i).tooltip
+                      for i in tm_config.INSERT_TYPE_INPUTS)
+
+        assert heat and grip and heat != grip
+
+    def test_exactly_one_family_is_chosen(self, heat_dialog):
+        on = [heat_dialog.itemById(i).value for i in tm_config.INSERT_TYPE_INPUTS]
+
+        assert on == [True, False]
 
     def test_it_opens_on_the_family_of_the_remembered_size(self, grip_dialog):
         assert tm_ui._isGripSelected(grip_dialog)
@@ -329,11 +341,22 @@ class TestActionButtons:
 
     def test_the_widest_label_gets_the_widest_column(self, grip_dialog):
         """Equal columns clipped "Restore User Saved" to "Restore User Sav..."."""
-        ratio = [int(part)
-                 for part in grip_dialog.itemById('gripActions').spec['ratio'].split(':')]
+        ratio = self.ratio(grip_dialog)
         widest = max(range(len(tm_ui.ACTIONS)), key=lambda i: len(tm_ui.ACTIONS[i][0]))
 
         assert ratio.index(max(ratio)) == widest
+
+    def test_the_shortest_label_still_gets_room_for_itself(self, grip_dialog):
+        """Sizing purely by label length left Save too narrow for the word."""
+        ratio = self.ratio(grip_dialog)
+        share = min(ratio) / sum(ratio)
+
+        assert share > 0.2, f'the narrowest column is only {share:.0%} of the row'
+
+    @staticmethod
+    def ratio(dialog):
+        return [int(part)
+                for part in dialog.itemById('gripActions').spec['ratio'].split(':')]
 
     def test_the_buttons_are_outlined(self, grip_dialog):
         """Borders, so they read as buttons rather than loose words."""
@@ -358,18 +381,31 @@ class TestIcons:
 
 class TestHoleType:
 
-    def test_it_is_labelled_rather_than_drawn(self, heat_dialog):
-        """Fusion's side-by-side row shows icons only, and these two read better
-        as words."""
-        assert heat_dialog.itemById('holeType').kind == 'radio'
-
-    def test_it_carries_no_tooltip(self, heat_dialog):
-        assert heat_dialog.itemById('holeType').tooltip == EMPTY_TOOLTIP
+    def test_it_is_one_visible_row_of_labelled_toggles(self, heat_dialog):
+        table = heat_dialog.itemById('holeTypeRow')
+        assert table.kind == 'table'
+        assert [heat_dialog.itemById(i).spec['name']
+                for i in tm_config.HOLE_TYPE_INPUTS] == ['Blind Hole', 'Through Hole']
 
     def test_exactly_one_option_is_selected(self, heat_dialog):
-        holeType = heat_dialog.itemById('holeType')
-        selected = [holeType.listItems.item(i).isSelected
-                    for i in range(holeType.listItems.count)]
+        on = [heat_dialog.itemById(i).value for i in tm_config.HOLE_TYPE_INPUTS]
 
-        assert sum(selected) == 1, 'mutually exclusive'
-        assert len(selected) == 2
+        assert sum(bool(v) for v in on) == 1, 'mutually exclusive'
+
+    def test_clicking_one_turns_the_other_off(self, heat_dialog):
+        blind, through = tm_config.HOLE_TYPE_INPUTS
+        heat_dialog.itemById(through).value = True
+
+        tm_ui._keepOneToggled(heat_dialog, through, tm_config.HOLE_TYPE_INPUTS)
+
+        assert heat_dialog.itemById(through).value is True
+        assert heat_dialog.itemById(blind).value is False
+
+    def test_unticking_the_chosen_one_puts_it_back(self, heat_dialog):
+        """Otherwise neither would be chosen and there would be no hole type."""
+        blind, _through = tm_config.HOLE_TYPE_INPUTS
+        heat_dialog.itemById(blind).value = False
+
+        tm_ui._keepOneToggled(heat_dialog, blind, tm_config.HOLE_TYPE_INPUTS)
+
+        assert heat_dialog.itemById(blind).value is True

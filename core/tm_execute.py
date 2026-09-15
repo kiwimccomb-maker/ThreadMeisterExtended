@@ -82,7 +82,6 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
             bodySelect = inputs.itemById('bodySelect')
             pointSelect = inputs.itemById('pointSelect')
             insertSize = inputs.itemById('insertSize')
-            holeType = inputs.itemById('holeType')
             addChamfer = inputs.itemById('addChamfer')
             addBottomRadius = inputs.itemById('addBottomRadius')
             exportDebugInput = inputs.itemById('exportDebug')
@@ -100,7 +99,8 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
             insertName = insertSize.selectedItem.name
             tm_config.save_last_selected_insert(insertName)
 
-            isBlindHole = holeType.selectedItem.name == 'Blind Hole'
+            isBlindHole = tm_config.is_blind_hole(
+                inputs, tm_state.CONFIG.get('hole_type_blind', True))
             includeChamfer = addChamfer.value if addChamfer else tm_state.CONFIG.get('chamfer_enabled_default', True)
             bottomRadiusChecked = addBottomRadius.value if addBottomRadius else tm_state.CONFIG.get('bottom_radius_enabled_default', False)
             includeBottomRadius = bottomRadiusChecked and isBlindHole
