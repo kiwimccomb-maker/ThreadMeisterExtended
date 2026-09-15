@@ -15,6 +15,7 @@ import tm_state
 import tm_ui
 
 
+EMPTY_TOOLTIP = ''
 HEAT_SIZE = 'M3 x 5.7mm (standard)'
 GRIP_SIZE = 'M3 Grip'
 
@@ -55,6 +56,11 @@ class Input:
         self.value = spec.get('initial')
         self.listItems = ListItems()
         self.children = None
+        self.commandInputs = None
+        self.cells = []
+
+    def addCommandInput(self, item, row, column):
+        self.cells.append((item.id, row, column))
 
     @property
     def selectedItem(self):
@@ -119,6 +125,12 @@ class Inputs:
         group.children = Inputs(self.registry, group=input_id)
         return group
 
+    def addTableCommandInput(self, input_id, name, columns, _ratio):
+        table = self._add(input_id, 'table', name=name, columns=columns)
+        # Fusion creates a table's cell contents in its own commandInputs
+        table.commandInputs = Inputs(self.registry, group=input_id)
+        return table
+
 
 def build_dialog(monkeypatch, last_selected):
     """Run CommandCreatedHandler.notify and hand back the registry."""
@@ -160,7 +172,7 @@ class TestItBuilds:
                     'holeType', 'addChamfer', 'addBottomRadius', 'infoText'}
         expected |= set(tm_config.SETTINGS_INPUTS)
         expected |= set(tm_config.GRIP_RIDGE_INPUTS)
-        expected |= set(tm_ui.ACTION_ROWS)
+        expected |= set(tm_ui.ACTION_BUTTONS)
 
         missing = expected - set(grip_dialog.registry)
         assert not missing, f'not built: {sorted(missing)}'
@@ -264,33 +276,43 @@ class TestTooltips:
 
 class TestActionButtons:
 
-    @pytest.mark.parametrize('row_id', sorted(tm_ui.ACTION_ROWS))
-    def test_actions_sit_on_one_row(self, grip_dialog, row_id):
-        """Side by side, not three stacked inputs."""
-        assert grip_dialog.itemById(row_id).kind == 'buttonrow'
+    @pytest.mark.parametrize('button', sorted(tm_ui.ACTION_BUTTONS))
+    def test_actions_are_labelled_buttons(self, grip_dialog, button):
+        """Words on the button: not an icon, and not a checkbox."""
+        item = grip_dialog.itemById(button)
+        assert item.kind == 'button'
+        assert item.spec['name']
+
+    @pytest.mark.parametrize('button', sorted(tm_ui.ACTION_BUTTONS))
+    def test_actions_carry_no_tooltip(self, grip_dialog, button):
+        """The label already says it; a tooltip would only repeat it."""
+        assert grip_dialog.itemById(button).tooltip == EMPTY_TOOLTIP
 
     def test_each_parameter_group_offers_all_three(self, grip_dialog):
-        for row_id in ('heatActions', 'gripActions'):
-            row = grip_dialog.itemById(row_id)
-            labels = [row.listItems.item(i).name for i in range(row.listItems.count)]
-            assert labels == [label for label, _icon, _suffix in tm_ui.ACTIONS]
+        for prefix in ('heat', 'grip'):
+            for _label, suffix in tm_ui.ACTIONS:
+                assert grip_dialog.itemById(prefix + suffix) is not None
 
-    def test_the_row_carries_no_label_of_its_own(self, grip_dialog):
-        """The label column repeated what was already on the buttons."""
-        assert grip_dialog.itemById('gripActions').spec['name'] == ''
+    def test_they_share_one_line(self, grip_dialog):
+        """A table is what puts them side by side while keeping their labels."""
+        for table_id in ('heatActions', 'gripActions'):
+            table = grip_dialog.itemById(table_id)
+            assert table.kind == 'table'
+            # all three in row 0, one per column
+            assert sorted(table.cells, key=lambda c: c[2]) == [
+                (table_id[:-len('Actions')] + suffix, 0, column)
+                for column, (_label, suffix) in enumerate(tm_ui.ACTIONS)]
 
     def test_nothing_starts_pressed(self, grip_dialog):
-        row = grip_dialog.itemById('gripActions')
-        assert not any(row.listItems.item(i).isSelected
-                       for i in range(row.listItems.count))
+        for button in tm_ui.ACTION_BUTTONS:
+            assert grip_dialog.itemById(button).value is False
 
 
 class TestIcons:
-    """A button row draws the icon, so every item needs one that is really there."""
+    """A button row draws the icon, so every item needs one that is really there.
+    The insert type toggle is the only row left that uses them."""
 
-    @pytest.mark.parametrize('folder', [
-        tm_ui.HEAT_ICONS, tm_ui.GRIP_ICONS, tm_ui.BLIND_ICONS, tm_ui.THROUGH_ICONS,
-    ] + [icon for _label, icon, _suffix in tm_ui.ACTIONS])
+    @pytest.mark.parametrize('folder', [tm_ui.HEAT_ICONS, tm_ui.GRIP_ICONS])
     def test_the_icon_folder_has_every_size_fusion_looks_for(self, folder):
         import os
         root = os.path.join(os.path.dirname(__file__), '..')
@@ -301,8 +323,13 @@ class TestIcons:
 
 class TestHoleType:
 
-    def test_it_is_a_side_by_side_button_row(self, heat_dialog):
-        assert heat_dialog.itemById('holeType').kind == 'buttonrow'
+    def test_it_is_labelled_rather_than_drawn(self, heat_dialog):
+        """Fusion's side-by-side row shows icons only, and these two read better
+        as words."""
+        assert heat_dialog.itemById('holeType').kind == 'radio'
+
+    def test_it_carries_no_tooltip(self, heat_dialog):
+        assert heat_dialog.itemById('holeType').tooltip == EMPTY_TOOLTIP
 
     def test_exactly_one_option_is_selected(self, heat_dialog):
         holeType = heat_dialog.itemById('holeType')

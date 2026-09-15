@@ -16,34 +16,40 @@ from tm_execute import CommandExecuteHandler
 INSERT_TYPE_HEAT = 'Heat-Set Insert'
 INSERT_TYPE_GRIP = 'Grip Ridge'
 
-# Button row icons, resolved by Fusion relative to the add-in folder
+# Insert type icons, resolved by Fusion relative to the add-in folder. This is
+# the one place a button row earns its keep, because the two families have
+# drawings that say more than their names do.
 HEAT_ICONS = 'resources/icons/heatset'
 GRIP_ICONS = 'resources/icons/gripridge'
-BLIND_ICONS = 'resources/icons/blindhole'
-THROUGH_ICONS = 'resources/icons/throughhole'
 
-# The actions every parameter group offers, as one row: label -> (icon, suffix).
-# A button row shows the icon and uses the label as its tooltip, which keeps the
-# text out of the label column where it used to appear twice.
+# The actions every parameter group offers: (button label, action suffix).
 ACTIONS = (
-    ('Restore Defaults', 'resources/icons/restoredefaults', 'RestoreDefaults'),
-    ('Save', 'resources/icons/save', 'Save'),
-    ('Restore User Saved', 'resources/icons/restoresaved', 'RestoreSaved'),
+    ('Restore Defaults', 'RestoreDefaults'),
+    ('Save', 'Save'),
+    ('Restore User Saved', 'RestoreSaved'),
 )
+GENERAL_ACTIONS = (('Save', 'Save'),)
 
 # Shown only while the Grip Ridge family is chosen. Two groups rather than one
 # because Fusion will not fold a group nested inside another group.
-GRIP_ONLY_INPUTS = ('gripRidgeGroup', 'gripShapeGroup', 'gripActions')
+GRIP_ONLY_INPUTS = (
+    ('gripRidgeGroup', 'gripShapeGroup', 'gripActions')
+    + tuple('grip' + suffix for _label, suffix in ACTIONS)
+)
 
-# Rows whose buttons act immediately and then clear their own selection
-ACTION_ROWS = ('heatActions', 'gripActions', 'generalActions')
+# Buttons that act immediately and then clear themselves
+ACTION_BUTTONS = (
+    tuple('heat' + suffix for _label, suffix in ACTIONS)
+    + tuple('grip' + suffix for _label, suffix in ACTIONS)
+    + tuple('general' + suffix for _label, suffix in GENERAL_ACTIONS)
+)
 
 # Anything that changes what the info panel should say
 REFRESH_INFO_ON = (
     ('insertType', 'insertSize', 'holeType', 'addChamfer')
     + tuple(tm_config.SETTINGS_INPUTS)
     + tm_config.GRIP_RIDGE_INPUTS
-    + ACTION_ROWS
+    + ACTION_BUTTONS
 )
 
 
@@ -112,12 +118,13 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             _fillInsertDropdown(insertDropdown, isGrip, lastSelected)
             lastSelected = _selectedName(insertDropdown) or lastSelected
 
-            # Hole type, side by side and mutually exclusive
-            _addToggleRow(
-                inputs, 'holeType', 'Hole Type',
-                [('Blind Hole', BLIND_ICONS), ('Through Hole', THROUGH_ICONS)],
-                0 if tm_state.CONFIG.get('hole_type_blind', True) else 1,
-                'Blind stops at the calculated depth. Through cuts the whole body.')
+            # Hole type. Mutually exclusive, and labelled rather than drawn:
+            # Fusion's side-by-side row shows icons only, and these two say more
+            # as words than any icon of them would.
+            holeType = inputs.addRadioButtonGroupCommandInput('holeType', 'Hole Type')
+            blindFirst = tm_state.CONFIG.get('hole_type_blind', True)
+            holeType.listItems.add('Blind Hole', blindFirst)
+            holeType.listItems.add('Through Hole', not blindFirst)
 
             _addHeatInsertGroup(inputs, not isGrip)
             _addGripRidgeGroup(inputs, lastSelected)
@@ -174,13 +181,11 @@ class InputChangedHandler(adsk.core.InputChangedEventHandler):
             if changedId == 'insertSize':
                 _loadGripSpec(inputs, _selectedName(inputs.itemById('insertSize')))
 
-            # Action buttons act at once so the result is visible, then release
-            # so none is left looking held down.
-            if changedId in ACTION_ROWS:
-                pressed = _selectedName(changedInput)
-                if pressed:
-                    _runAction(inputs, changedId[:-len('Actions')], pressed)
-                    _clearRowSelection(changedInput)
+            # Action buttons act at once so the result is visible, then clear
+            # themselves so they read as buttons rather than settings left on.
+            if changedId in ACTION_BUTTONS and changedInput.value:
+                _runAction(inputs, changedId)
+                changedInput.value = False
 
             if changedId in REFRESH_INFO_ON:
                 updateInfoText(inputs)
@@ -264,36 +269,34 @@ def _addToggleRow(inputs, input_id, label, items, selected_index, tooltip):
 
 
 def _addActionButtons(children, prefix, actions=ACTIONS):
-    """One row of action buttons for a parameter group.
+    """One line of labelled action buttons for a parameter group.
 
-    A row rather than separate inputs so they sit side by side, and because a
-    bool input styled as a button repeats its label in the label column as well
-    as on the button itself.
+    A table is the only thing in Fusion that puts several inputs on one line
+    while they keep their labels: a button row would be icons only, and separate
+    bool inputs each take a line to themselves. If the table will not build, they
+    fall back to exactly that, which is merely taller.
     """
-    row_id = prefix + 'Actions'
+    table_id = prefix + 'Actions'
     try:
-        row = children.addButtonRowCommandInput(row_id, '', False)
-        for label, folder, _suffix in actions:
-            row.listItems.add(label, False, folder)
+        table = children.addTableCommandInput(
+            table_id, '', len(actions), ':'.join('1' * len(actions)))
+        table.minimumVisibleRows = 1
+        table.maximumVisibleRows = 1
+        table.hasGrid = False
+        table.tablePresentationStyle = \
+            adsk.core.TablePresentationStyles.transparentBackgroundTablePresentationStyle
+        for column, (label, suffix) in enumerate(actions):
+            button = table.commandInputs.addBoolValueInput(
+                prefix + suffix, label, False, '', False)
+            table.addCommandInput(button, 0, column)
+        return table
     except Exception:
-        existing = children.itemById(row_id)
+        existing = children.itemById(table_id)
         if existing:
             existing.deleteMe()
-        row = children.addRadioButtonGroupCommandInput(row_id, '')
-        for label, _folder, _suffix in actions:
-            row.listItems.add(label, False)
-    row.tooltip = ('Restore Defaults loads the shipped values, Save writes what is '
-                   'on screen to config.ini, Restore User Saved goes back to what '
-                   'is in config.ini.')
-    return row
-
-
-def _clearRowSelection(row):
-    """Leave no button looking held down after it has acted."""
-    for index in range(row.listItems.count):
-        item = row.listItems.item(index)
-        if item.isSelected:
-            item.isSelected = False
+        for label, suffix in actions:
+            children.addBoolValueInput(prefix + suffix, label, False, '', False)
+        return None
 
 
 def _addHeatInsertGroup(inputs, visible):
@@ -421,7 +424,7 @@ def _addGeneralGroup(inputs):
         tm_state.CONFIG.get('enable_logging', False))
     logging.tooltip = 'Write diagnostics to the Text Commands palette.'
 
-    _addActionButtons(children, 'general', actions=(ACTIONS[1],))
+    _addActionButtons(children, 'general', actions=GENERAL_ACTIONS)
     return group
 
 
@@ -455,12 +458,8 @@ def _loadGripSpec(inputs, insert_name):
         _writeGripSpec(inputs, spec)
 
 
-def _runAction(inputs, prefix, pressed_label):
+def _runAction(inputs, action_id):
     """Carry out one action button. Only Save writes config.ini."""
-    suffix = next((s for label, _icon, s in ACTIONS if label == pressed_label), None)
-    if suffix is None:
-        return
-    action_id = prefix + suffix
     insertName = _selectedName(inputs.itemById('insertSize'))
 
     if action_id == 'heatRestoreDefaults':
