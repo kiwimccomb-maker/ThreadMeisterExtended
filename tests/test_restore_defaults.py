@@ -67,14 +67,39 @@ class FakeInputs:
         return _Input()
 
 
-def press(inputs, input_id):
-    """Fire InputChangedHandler for one input, the way Fusion does."""
+class ActionRow:
+    """A button row: one item gets selected, the handler acts and releases it."""
+
+    def __init__(self, row_id, pressed_label):
+        self.id = row_id
+        self._items = []
+        for label, _icon, _suffix in tm_ui.ACTIONS:
+            item = MagicMock()
+            item.name = label
+            item.isSelected = (label == pressed_label)
+            self._items.append(item)
+        self.listItems = MagicMock(
+            count=len(self._items), item=lambda i: self._items[i])
+
+    @property
+    def selectedItem(self):
+        return next((i for i in self._items if i.isSelected), None)
+
+    @property
+    def released(self):
+        return not any(i.isSelected for i in self._items)
+
+
+def press(inputs, row_id, label):
+    """Click one button on an action row, the way Fusion reports it."""
+    row = ActionRow(row_id, label)
     args = MagicMock()
-    args.input = inputs.itemById(input_id)
+    args.input = row
     # The handler must reach the command's own inputs, not the group's children
     args.firingEvent.sender.commandInputs = inputs
     args.inputs = MagicMock(itemById=lambda _id: None)
     tm_ui.InputChangedHandler().notify(args)
+    return row
 
 
 @pytest.fixture(autouse=True)
@@ -107,17 +132,18 @@ def grip_inputs(edited=True):
     return FakeInputs(values)
 
 
+ACTION_LABELS = [label for label, _icon, _suffix in tm_ui.ACTIONS]
+
+
 class TestTheCrashIsGone:
     """itemById('insertSize') returned None because args.inputs was the group's
     children, so .selectedItem raised AttributeError."""
 
-    @pytest.mark.parametrize('button', ['gripRestoreDefaults', 'gripSave',
-                                        'gripRestoreSaved'])
-    def test_pressing_a_grip_button_does_not_raise(self, button):
+    @pytest.mark.parametrize('label', ACTION_LABELS)
+    def test_pressing_a_grip_button_does_not_raise(self, label):
         inputs = grip_inputs()
-        inputs.values[button] = True
 
-        press(inputs, button)
+        press(inputs, 'gripActions', label)
 
         assert not tm_state._ui.messageBox.called, tm_state._ui.messageBox.call_args
 
@@ -128,7 +154,7 @@ class TestRestoreDefaults:
         inputs = grip_inputs()
         inputs.values['gripRestoreDefaults'] = True
 
-        press(inputs, 'gripRestoreDefaults')
+        press(inputs, 'gripActions', 'Restore Defaults')
 
         assert tuple(inputs.values[i] for i in GRIP_RIDGE_INPUTS) == M3_GRIP_DEFAULT
 
@@ -137,7 +163,7 @@ class TestRestoreDefaults:
         inputs = grip_inputs()
         inputs.values['gripRestoreDefaults'] = True
 
-        press(inputs, 'gripRestoreDefaults')
+        press(inputs, 'gripActions', 'Restore Defaults')
 
         assert inputs.values['setGripChamferAngle'] == tm_state.DEFAULT_CONFIG['grip_chamfer_angle']
 
@@ -146,7 +172,7 @@ class TestRestoreDefaults:
         inputs._selected = 'M8 Grip'
         inputs.values['gripRestoreDefaults'] = True
 
-        press(inputs, 'gripRestoreDefaults')
+        press(inputs, 'gripActions', 'Restore Defaults')
 
         assert tuple(inputs.values[i] for i in GRIP_RIDGE_INPUTS) == \
             get_default_grip_ridge_inserts()['M8 Grip']
@@ -155,7 +181,7 @@ class TestRestoreDefaults:
         inputs = heat_inputs()
         inputs.values['heatRestoreDefaults'] = True
 
-        press(inputs, 'heatRestoreDefaults')
+        press(inputs, 'heatActions', 'Restore Defaults')
 
         for input_id, (key, _section) in HEAT_INSERT_INPUTS.items():
             assert inputs.values[input_id] == tm_state.DEFAULT_CONFIG[key], input_id
@@ -164,7 +190,7 @@ class TestRestoreDefaults:
         inputs = heat_inputs()
         inputs.values['heatRestoreDefaults'] = True
 
-        press(inputs, 'heatRestoreDefaults')
+        press(inputs, 'heatActions', 'Restore Defaults')
 
         assert inputs.values['addChamfer'] == tm_state.DEFAULT_CONFIG['chamfer_enabled_default']
         assert inputs.values['addBottomRadius'] == \
@@ -174,7 +200,7 @@ class TestRestoreDefaults:
         inputs = grip_inputs()
         inputs.values['gripRestoreDefaults'] = True
 
-        press(inputs, 'gripRestoreDefaults')
+        press(inputs, 'gripActions', 'Restore Defaults')
 
         assert isolate == {}, 'config.ini is only written by Save'
 
@@ -186,7 +212,7 @@ class TestSave:
         inputs = grip_inputs()
         inputs.values['gripSave'] = True
 
-        press(inputs, 'gripSave')
+        press(inputs, 'gripActions', 'Save')
 
         assert isolate['grip'] == ('M3 Grip', EDITED_SPEC)
 
@@ -195,7 +221,7 @@ class TestSave:
         inputs = grip_inputs()
         inputs.values['gripSave'] = True
 
-        press(inputs, 'gripSave')
+        press(inputs, 'gripActions', 'Save')
 
         assert tm_state.GRIP_RIDGE_INSERTS['M3 Grip'] == EDITED_SPEC
 
@@ -203,7 +229,7 @@ class TestSave:
         inputs = heat_inputs()
         inputs.values['heatSave'] = True
 
-        press(inputs, 'heatSave')
+        press(inputs, 'heatActions', 'Save')
 
         assert 'settings' in isolate
 
@@ -218,7 +244,7 @@ class TestRestoreUserSaved:
         inputs = grip_inputs()
         inputs.values['gripRestoreSaved'] = True
 
-        press(inputs, 'gripRestoreSaved')
+        press(inputs, 'gripActions', 'Restore User Saved')
 
         assert tuple(inputs.values[i] for i in GRIP_RIDGE_INPUTS) == saved
 
@@ -228,7 +254,7 @@ class TestRestoreUserSaved:
         inputs = heat_inputs()
         inputs.values['heatRestoreSaved'] = True
 
-        press(inputs, 'heatRestoreSaved')
+        press(inputs, 'heatActions', 'Restore User Saved')
 
         for input_id in HEAT_INSERT_INPUTS:
             assert inputs.values[input_id] == 2.5
@@ -240,28 +266,27 @@ class TestRestoreUserSaved:
         inputs = grip_inputs()
         inputs.values['gripRestoreSaved'] = True
 
-        press(inputs, 'gripRestoreSaved')
+        press(inputs, 'gripActions', 'Restore User Saved')
 
         assert tuple(inputs.values[i] for i in GRIP_RIDGE_INPUTS) == EDITED_SPEC
 
 
-class TestButtonsClearThemselves:
+class TestButtonsRelease:
 
-    @pytest.mark.parametrize('button', ['gripRestoreDefaults', 'gripSave',
-                                        'gripRestoreSaved'])
-    def test_pressed_button_resets(self, button):
+    @pytest.mark.parametrize('label', ACTION_LABELS)
+    def test_a_pressed_button_does_not_stay_down(self, label):
         inputs = grip_inputs()
-        inputs.values[button] = True
 
-        press(inputs, button)
+        row = press(inputs, 'gripActions', label)
 
-        assert inputs.values[button] is False
+        assert row.released
 
-    def test_an_unpressed_button_does_nothing(self):
+    def test_a_row_with_nothing_pressed_does_nothing(self):
+        """Releasing fires the event again; it must not act a second time."""
         inputs = grip_inputs()
         before = dict(inputs.values)
 
-        press(inputs, 'gripRestoreDefaults')
+        press(inputs, 'gripActions', None)
 
         assert inputs.values == before
 

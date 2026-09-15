@@ -130,6 +130,8 @@ class RecordingInputs:
         self.tooltips = {}
         self.order = []
         self.collapsed = {}
+        self.rows = {}
+        self.row_items = {}
 
     def _record_tooltip(self, input_id):
         self.order.append(input_id)
@@ -146,6 +148,24 @@ class RecordingInputs:
                     object.__setattr__(self, name, val)
 
         return _Input()
+
+    def itemById(self, input_id):
+        return None
+
+    def addButtonRowCommandInput(self, input_id, name, _multi):
+        holder = self
+        holder.rows[input_id] = name
+
+        class _Items:
+            @staticmethod
+            def add(label, isSelected, folder=''):
+                holder.row_items.setdefault(input_id, []).append((label, folder))
+
+            count = 0
+
+        row = holder._record_tooltip(input_id)
+        object.__setattr__(row, 'listItems', _Items())
+        return row
 
     def addGroupCommandInput(self, input_id, name):
         holder = self

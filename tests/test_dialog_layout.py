@@ -160,7 +160,7 @@ class TestItBuilds:
                     'holeType', 'addChamfer', 'addBottomRadius', 'infoText'}
         expected |= set(tm_config.SETTINGS_INPUTS)
         expected |= set(tm_config.GRIP_RIDGE_INPUTS)
-        expected |= set(tm_ui.ACTION_BUTTONS)
+        expected |= set(tm_ui.ACTION_ROWS)
 
         missing = expected - set(grip_dialog.registry)
         assert not missing, f'not built: {sorted(missing)}'
@@ -235,6 +235,16 @@ class TestGrouping:
             assert grip_dialog.itemById(input_id).group == 'gripShapeGroup', input_id
         assert not grip_dialog.itemById('gripShapeGroup').isExpanded
 
+    def test_ridge_shape_is_not_nested_inside_another_group(self, grip_dialog):
+        """Fusion raises "the group cannot be folded" for a group inside a group,
+        and draws it as a stray label instead."""
+        assert grip_dialog.itemById('gripShapeGroup').group is None
+        assert grip_dialog.itemById('gripRidgeGroup').group is None
+
+    def test_the_grip_groups_hide_together(self, heat_dialog):
+        for input_id in tm_ui.GRIP_ONLY_INPUTS:
+            assert not heat_dialog.itemById(input_id).isVisible, input_id
+
 
 class TestTooltips:
 
@@ -254,14 +264,39 @@ class TestTooltips:
 
 class TestActionButtons:
 
-    @pytest.mark.parametrize('button', sorted(tm_ui.ACTION_BUTTONS))
-    def test_actions_are_buttons_not_checkboxes(self, grip_dialog, button):
-        assert grip_dialog.itemById(button).kind == 'button'
+    @pytest.mark.parametrize('row_id', sorted(tm_ui.ACTION_ROWS))
+    def test_actions_sit_on_one_row(self, grip_dialog, row_id):
+        """Side by side, not three stacked inputs."""
+        assert grip_dialog.itemById(row_id).kind == 'buttonrow'
 
-    def test_each_parameter_group_gets_all_three(self, grip_dialog):
-        for prefix in ('heat', 'grip'):
-            for suffix in ('RestoreDefaults', 'Save', 'RestoreSaved'):
-                assert grip_dialog.itemById(prefix + suffix) is not None
+    def test_each_parameter_group_offers_all_three(self, grip_dialog):
+        for row_id in ('heatActions', 'gripActions'):
+            row = grip_dialog.itemById(row_id)
+            labels = [row.listItems.item(i).name for i in range(row.listItems.count)]
+            assert labels == [label for label, _icon, _suffix in tm_ui.ACTIONS]
+
+    def test_the_row_carries_no_label_of_its_own(self, grip_dialog):
+        """The label column repeated what was already on the buttons."""
+        assert grip_dialog.itemById('gripActions').spec['name'] == ''
+
+    def test_nothing_starts_pressed(self, grip_dialog):
+        row = grip_dialog.itemById('gripActions')
+        assert not any(row.listItems.item(i).isSelected
+                       for i in range(row.listItems.count))
+
+
+class TestIcons:
+    """A button row draws the icon, so every item needs one that is really there."""
+
+    @pytest.mark.parametrize('folder', [
+        tm_ui.HEAT_ICONS, tm_ui.GRIP_ICONS, tm_ui.BLIND_ICONS, tm_ui.THROUGH_ICONS,
+    ] + [icon for _label, icon, _suffix in tm_ui.ACTIONS])
+    def test_the_icon_folder_has_every_size_fusion_looks_for(self, folder):
+        import os
+        root = os.path.join(os.path.dirname(__file__), '..')
+        for size in (16, 32, 64, 128):
+            path = os.path.join(root, folder, f'{size}x{size}.png')
+            assert os.path.isfile(path), f'missing {folder}/{size}x{size}.png'
 
 
 class TestHoleType:

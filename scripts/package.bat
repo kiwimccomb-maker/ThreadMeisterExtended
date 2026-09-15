@@ -44,7 +44,7 @@ powershell -NoProfile -Command ^
   "Copy-Item (Join-Path $root 'License.txt') $pkg;" ^
   "Copy-Item (Join-Path $root 'Readme.md') $pkg;" ^
   "Copy-Item (Join-Path $root 'core\*.py') (Join-Path $pkg 'core');" ^
-  "Copy-Item (Join-Path $root 'resources\icons\*') (Join-Path $pkg 'resources\icons');" ^
+  "Copy-Item (Join-Path $root 'resources\icons\*') (Join-Path $pkg 'resources\icons') -Recurse;" ^
   "Copy-Item (Join-Path $root 'resources\help.html') (Join-Path $pkg 'resources');" ^
   "Copy-Item (Join-Path $root 'ThreadMeisterExtended.png') $pkg;" ^
   "New-Item -ItemType Directory -Path (Split-Path $zip) -Force | Out-Null;" ^

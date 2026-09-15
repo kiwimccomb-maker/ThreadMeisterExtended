@@ -16,19 +16,34 @@ from tm_execute import CommandExecuteHandler
 INSERT_TYPE_HEAT = 'Heat-Set Insert'
 INSERT_TYPE_GRIP = 'Grip Ridge'
 
-# Buttons that act immediately and then clear themselves
-ACTION_BUTTONS = (
-    'heatRestoreDefaults', 'heatSave', 'heatRestoreSaved',
-    'gripRestoreDefaults', 'gripSave', 'gripRestoreSaved',
-    'generalSave',
+# Button row icons, resolved by Fusion relative to the add-in folder
+HEAT_ICONS = 'resources/icons/heatset'
+GRIP_ICONS = 'resources/icons/gripridge'
+BLIND_ICONS = 'resources/icons/blindhole'
+THROUGH_ICONS = 'resources/icons/throughhole'
+
+# The actions every parameter group offers, as one row: label -> (icon, suffix).
+# A button row shows the icon and uses the label as its tooltip, which keeps the
+# text out of the label column where it used to appear twice.
+ACTIONS = (
+    ('Restore Defaults', 'resources/icons/restoredefaults', 'RestoreDefaults'),
+    ('Save', 'resources/icons/save', 'Save'),
+    ('Restore User Saved', 'resources/icons/restoresaved', 'RestoreSaved'),
 )
+
+# Shown only while the Grip Ridge family is chosen. Two groups rather than one
+# because Fusion will not fold a group nested inside another group.
+GRIP_ONLY_INPUTS = ('gripRidgeGroup', 'gripShapeGroup', 'gripActions')
+
+# Rows whose buttons act immediately and then clear their own selection
+ACTION_ROWS = ('heatActions', 'gripActions', 'generalActions')
 
 # Anything that changes what the info panel should say
 REFRESH_INFO_ON = (
     ('insertType', 'insertSize', 'holeType', 'addChamfer')
     + tuple(tm_config.SETTINGS_INPUTS)
     + tm_config.GRIP_RIDGE_INPUTS
-    + ACTION_BUTTONS
+    + ACTION_ROWS
 )
 
 
@@ -83,7 +98,8 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             isGrip = lastSelected in tm_state.GRIP_RIDGE_INSERTS
             _addToggleRow(
                 inputs, 'insertType', 'Insert Type',
-                [INSERT_TYPE_HEAT, INSERT_TYPE_GRIP], 1 if isGrip else 0,
+                [(INSERT_TYPE_HEAT, HEAT_ICONS), (INSERT_TYPE_GRIP, GRIP_ICONS)],
+                1 if isGrip else 0,
                 'Heat-set inserts are melted into a plain bore. Grip ridges are '
                 'printed ridges a screw forms its own thread against.')
 
@@ -99,7 +115,7 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             # Hole type, side by side and mutually exclusive
             _addToggleRow(
                 inputs, 'holeType', 'Hole Type',
-                ['Blind Hole', 'Through Hole'],
+                [('Blind Hole', BLIND_ICONS), ('Through Hole', THROUGH_ICONS)],
                 0 if tm_state.CONFIG.get('hole_type_blind', True) else 1,
                 'Blind stops at the calculated depth. Through cuts the whole body.')
 
@@ -158,11 +174,13 @@ class InputChangedHandler(adsk.core.InputChangedEventHandler):
             if changedId == 'insertSize':
                 _loadGripSpec(inputs, _selectedName(inputs.itemById('insertSize')))
 
-            # Action buttons act at once so the result is visible, then clear
-            # themselves so they read as buttons rather than settings left on.
-            if changedId in ACTION_BUTTONS and changedInput.value:
-                _runAction(inputs, changedId)
-                changedInput.value = False
+            # Action buttons act at once so the result is visible, then release
+            # so none is left looking held down.
+            if changedId in ACTION_ROWS:
+                pressed = _selectedName(changedInput)
+                if pressed:
+                    _runAction(inputs, changedId[:-len('Actions')], pressed)
+                    _clearRowSelection(changedInput)
 
             if changedId in REFRESH_INFO_ON:
                 updateInfoText(inputs)
@@ -223,49 +241,59 @@ def _fillInsertDropdown(dropdown, is_grip, preferred=None):
         items.item(0).isSelected = True
 
 
-def _addToggleRow(inputs, input_id, label, names, selected_index, tooltip):
+def _addToggleRow(inputs, input_id, label, items, selected_index, tooltip):
     """Mutually exclusive buttons, side by side.
 
-    Falls back to a radio group if this Fusion build will not build a button row
-    without icon resources, so the dialog always opens.
+    `items` is a list of (name, icon folder); a button row draws the icon and uses
+    the name as its tooltip. Falls back to a radio group, which draws the name,
+    if this build will not make a button row, so the dialog always opens.
     """
     try:
         row = inputs.addButtonRowCommandInput(input_id, label, False)
-        for index, name in enumerate(names):
-            row.listItems.add(name, index == selected_index, '')
+        for index, (name, folder) in enumerate(items):
+            row.listItems.add(name, index == selected_index, folder)
     except Exception:
         existing = inputs.itemById(input_id)
         if existing:
             existing.deleteMe()
         row = inputs.addRadioButtonGroupCommandInput(input_id, label)
-        for index, name in enumerate(names):
+        for index, (name, _folder) in enumerate(items):
             row.listItems.add(name, index == selected_index)
     row.tooltip = tooltip
     return row
 
 
-def _addActionButton(children, input_id, label, tooltip):
-    """A clickable button, or a self-clearing checkbox where one is unavailable."""
+def _addActionButtons(children, prefix, actions=ACTIONS):
+    """One row of action buttons for a parameter group.
+
+    A row rather than separate inputs so they sit side by side, and because a
+    bool input styled as a button repeats its label in the label column as well
+    as on the button itself.
+    """
+    row_id = prefix + 'Actions'
     try:
-        button = children.addBoolValueInput(input_id, label, False, '', False)
+        row = children.addButtonRowCommandInput(row_id, '', False)
+        for label, folder, _suffix in actions:
+            row.listItems.add(label, False, folder)
     except Exception:
-        button = children.addBoolValueInput(input_id, label, True, '', False)
-    button.tooltip = tooltip
-    return button
+        existing = children.itemById(row_id)
+        if existing:
+            existing.deleteMe()
+        row = children.addRadioButtonGroupCommandInput(row_id, '')
+        for label, _folder, _suffix in actions:
+            row.listItems.add(label, False)
+    row.tooltip = ('Restore Defaults loads the shipped values, Save writes what is '
+                   'on screen to config.ini, Restore User Saved goes back to what '
+                   'is in config.ini.')
+    return row
 
 
-def _addActionButtons(children, prefix):
-    """Restore Defaults / Save / Restore User Saved for one parameter group."""
-    _addActionButton(
-        children, prefix + 'RestoreDefaults', 'Restore Defaults',
-        'Put these back to the values ThreadMeister ships with. Nothing is written '
-        'to config.ini until you press Save.')
-    _addActionButton(
-        children, prefix + 'Save', 'Save',
-        'Write these values to config.ini, so this is what opens next time.')
-    _addActionButton(
-        children, prefix + 'RestoreSaved', 'Restore User Saved',
-        'Drop edits made here and go back to what was last saved to config.ini.')
+def _clearRowSelection(row):
+    """Leave no button looking held down after it has acted."""
+    for index in range(row.listItems.count):
+        item = row.listItems.item(index)
+        if item.isSelected:
+            item.isSelected = False
 
 
 def _addHeatInsertGroup(inputs, visible):
@@ -311,8 +339,12 @@ def _addHeatInsertGroup(inputs, visible):
 def _addGripRidgeGroup(inputs, insert_name):
     """Per-insert grip ridge geometry from [GripRidgeInserts].
 
-    Hole depth sits at the top because it is the one regularly changed; the
-    geometry defining the ridge shape stays in a sub-group that starts collapsed.
+    Two top-level groups, not one with a sub-group: Fusion refuses to fold a group
+    nested inside another group ("the group cannot be folded"), and renders it as a
+    stray label instead. So Ridge Shape is a sibling of Grip Ridge Parameters.
+
+    Hole depth stays out in the open because it is the one regularly changed;
+    everything defining the ridge shape sits in Ridge Shape, which starts closed.
     Unitless spinners, mm as labelled, min/max mirroring load_config().
     """
     spec = tm_state.GRIP_RIDGE_INSERTS.get(insert_name)
@@ -323,15 +355,13 @@ def _addGripRidgeGroup(inputs, insert_name):
     clearance, depth, chamfer, ridge_dia, arc_distance, count = spec
 
     group = inputs.addGroupCommandInput('gripRidgeGroup', 'Grip Ridge Parameters')
-    children = group.children
-
-    holeDepth = children.addFloatSpinnerCommandInput(
+    holeDepth = group.children.addFloatSpinnerCommandInput(
         'gripEdgeDepth', 'Hole Depth (mm)', '', 0.1, 100.0, 0.5, depth)
     holeDepth.tooltip = ('How deep to cut. The usual thing to change: deeper gives '
                          'the screw more ridge to bite into, within the wall '
                          'thickness you have.')
 
-    shape = children.addGroupCommandInput('gripShapeGroup', 'Ridge Shape')
+    shape = inputs.addGroupCommandInput('gripShapeGroup', 'Ridge Shape')
     shape.isExpanded = False
     shaped = shape.children
 
@@ -368,8 +398,10 @@ def _addGripRidgeGroup(inputs, insert_name):
     angleInput.tooltip = ('Angle of that lead-in, measured from the face. Shallower '
                           'gives a longer, gentler lead-in.')
 
-    _addActionButtons(children, 'grip')
-    group.isVisible = insert_name in tm_state.GRIP_RIDGE_INSERTS
+    # Below both groups, so they act on everything above them
+    _addActionButtons(inputs, 'grip')
+
+    _applyTypeVisibility(inputs, insert_name in tm_state.GRIP_RIDGE_INSERTS)
     return group
 
 
@@ -389,19 +421,19 @@ def _addGeneralGroup(inputs):
         tm_state.CONFIG.get('enable_logging', False))
     logging.tooltip = 'Write diagnostics to the Text Commands palette.'
 
-    _addActionButton(children, 'generalSave', 'Save',
-                     'Write these two options to config.ini.')
+    _addActionButtons(children, 'general', actions=(ACTIONS[1],))
     return group
 
 
 def _applyTypeVisibility(inputs, is_grip):
     """Only the chosen family's parameters stay on screen."""
     heat = inputs.itemById('heatInsertGroup')
-    grip = inputs.itemById('gripRidgeGroup')
     if heat:
         heat.isVisible = not is_grip
-    if grip:
-        grip.isVisible = is_grip
+    for input_id in GRIP_ONLY_INPUTS:
+        item = inputs.itemById(input_id)
+        if item:
+            item.isVisible = is_grip
 
 
 def _writeGripSpec(inputs, spec):
@@ -423,8 +455,12 @@ def _loadGripSpec(inputs, insert_name):
         _writeGripSpec(inputs, spec)
 
 
-def _runAction(inputs, action_id):
+def _runAction(inputs, prefix, pressed_label):
     """Carry out one action button. Only Save writes config.ini."""
+    suffix = next((s for label, _icon, s in ACTIONS if label == pressed_label), None)
+    if suffix is None:
+        return
+    action_id = prefix + suffix
     insertName = _selectedName(inputs.itemById('insertSize'))
 
     if action_id == 'heatRestoreDefaults':
