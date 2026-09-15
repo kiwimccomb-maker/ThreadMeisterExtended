@@ -59,8 +59,6 @@ ACTION_BUTTONS = (
 # Anything that changes what the info panel should say
 REFRESH_INFO_ON = (
     ('insertType', 'insertSize', 'holeType', 'addChamfer')
-    + tm_config.HOLE_TYPE_INPUTS
-    + tm_config.INSERT_TYPE_INPUTS
     + tuple(tm_config.SETTINGS_INPUTS)
     + tm_config.GRIP_RIDGE_INPUTS
     + ACTION_BUTTONS
@@ -121,15 +119,7 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             # decides both the size list and which parameter group is on screen.
             lastSelected = tm_state.CONFIG.get('last_selected_insert', '')
             isGrip = lastSelected in tm_state.GRIP_RIDGE_INSERTS
-            _addToggleRow(
-                inputs, 'insertTypeRow', 'Insert Type',
-                tm_config.INSERT_TYPE_INPUTS,
-                (INSERT_TYPE_HEAT, INSERT_TYPE_GRIP),
-                first_is_on=not isGrip,
-                tooltips=(
-                    'A plain bore for an insert melted in with a soldering iron.',
-                    'Printed ridges a screw forms its own thread against, with no '
-                    'insert at all.'))
+            _addInsertTypeInput(inputs, isGrip)
 
             # Insert size, refilled whenever the type changes
             insertDropdown = inputs.addDropDownCommandInput(
@@ -140,15 +130,13 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             _fillInsertDropdown(insertDropdown, isGrip, lastSelected)
             lastSelected = _selectedName(insertDropdown) or lastSelected
 
-            _addToggleRow(
-                inputs, 'holeTypeRow', 'Hole Type',
-                tm_config.HOLE_TYPE_INPUTS,
-                ('Blind Hole', 'Through Hole'),
-                first_is_on=tm_state.CONFIG.get('hole_type_blind', True),
-                tooltips=(
-                    'Stops at the depth worked out from the insert and the '
-                    'settings below.',
-                    'Cuts all the way through the body.'))
+            # Mutually exclusive and labelled. Stacked rather than side by side:
+            # Fusion's one side-by-side control draws icons with no text, and
+            # anything nested in a table cannot be read back by id.
+            holeType = inputs.addRadioButtonGroupCommandInput('holeType', 'Hole Type')
+            blindFirst = tm_state.CONFIG.get('hole_type_blind', True)
+            holeType.listItems.add('Blind Hole', blindFirst)
+            holeType.listItems.add('Through Hole', not blindFirst)
 
             _addHeatInsertGroup(inputs, not isGrip)
             _addGripRidgeGroup(inputs, lastSelected)
@@ -190,12 +178,6 @@ class InputChangedHandler(adsk.core.InputChangedEventHandler):
                     if pointSelect:
                         pointSelect.isEnabled = True
                         pointSelect.hasFocus = True
-
-            if _keepOneToggled(inputs, changedId, tm_config.HOLE_TYPE_INPUTS):
-                changedId = 'holeType'
-
-            if _keepOneToggled(inputs, changedId, tm_config.INSERT_TYPE_INPUTS):
-                changedId = 'insertType'
 
             # Switching family refills the size list and swaps the visible group
             if changedId == 'insertType':
@@ -262,7 +244,7 @@ def _selectedName(listInput):
 
 def _isGripSelected(inputs):
     """True when the Grip Ridge family is chosen."""
-    return not tm_config.is_heat_insert(inputs)
+    return _selectedName(inputs.itemById('insertType')) == INSERT_TYPE_GRIP
 
 
 def _fillInsertDropdown(dropdown, is_grip, preferred=None):
@@ -276,61 +258,40 @@ def _fillInsertDropdown(dropdown, is_grip, preferred=None):
         items.item(0).isSelected = True
 
 
-def _addToggleRow(inputs, table_id, label, input_ids, labels,
-                  first_is_on, tooltips):
-    """A two-option picker as one visible row of labelled toggles.
+def _addInsertTypeInput(inputs, is_grip):
+    """Pick the insert family, showing each option's icon next to its name.
 
-    Always on screen rather than behind a dropdown, since there are only ever two
-    of them, and side by side rather than stacked. A table is what puts two
-    inputs on one line; its item borders are what make them read as buttons.
-
-    They are checkboxes because a button cannot show which option is currently
-    chosen, and the handler keeps exactly one of them ticked.
+    A list rather than a row of buttons: a button row draws icons alone with the
+    name only as hover text, and a row of toggles has to live in a table, whose
+    contents itemById will not find. A labelled-icon list shows an icon and a
+    name together and sits at the top level where it can be read back.
     """
+    items = ((INSERT_TYPE_HEAT, HEAT_ICONS), (INSERT_TYPE_GRIP, GRIP_ICONS))
     try:
-        table = inputs.addTableCommandInput(table_id, label, len(labels), '1:1')
-        table.minimumVisibleRows = 1
-        table.maximumVisibleRows = 1
-        table.hasGrid = False
-        table.tablePresentationStyle = \
-            adsk.core.TablePresentationStyles.itemBorderTablePresentationStyle
-        for column, (input_id, text, tip) in enumerate(
-                zip(input_ids, labels, tooltips)):
-            toggle = table.commandInputs.addBoolValueInput(
-                input_id, text, True, '', column == (0 if first_is_on else 1))
-            toggle.tooltip = tip
-            table.addCommandInput(toggle, 0, column)
-        return table
+        picker = inputs.addDropDownCommandInput(
+            'insertType', 'Insert Type',
+            adsk.core.DropDownStyles.LabeledIconDropDownStyle)
+        for name, folder in items:
+            picker.listItems.add(name, name == _typeName(is_grip), folder)
     except Exception:
-        existing = inputs.itemById(table_id)
+        existing = inputs.itemById('insertType')
         if existing:
             existing.deleteMe()
-        for column, (input_id, text, tip) in enumerate(
-                zip(input_ids, labels, tooltips)):
-            toggle = inputs.addBoolValueInput(
-                input_id, text, True, '', column == (0 if first_is_on else 1))
-            toggle.tooltip = tip
-        return None
+        picker = inputs.addDropDownCommandInput(
+            'insertType', 'Insert Type',
+            adsk.core.DropDownStyles.TextListDropDownStyle)
+        for name, _folder in items:
+            picker.listItems.add(name, name == _typeName(is_grip))
+    picker.tooltip = (
+        'Heat-Set Insert: a plain bore for an insert melted in with a soldering '
+        'iron.\n'
+        'Grip Ridge: printed ridges a screw forms its own thread against, with no '
+        'insert at all.')
+    return picker
 
 
-def _keepOneToggled(inputs, changed_id, input_ids):
-    """Two toggles, exactly one on. Clicking either makes it the chosen one.
-
-    Unticking the one that is already on would leave neither chosen, so that puts
-    it straight back and turns the other off instead.
-    """
-    if changed_id not in input_ids:
-        return False
-    other_id = input_ids[1] if changed_id == input_ids[0] else input_ids[0]
-    changed = inputs.itemById(changed_id)
-    other = inputs.itemById(other_id)
-    if changed is None or other is None:
-        return True
-    if changed.value:
-        other.value = False
-    else:
-        changed.value = True
-    return True
+def _typeName(is_grip):
+    return INSERT_TYPE_GRIP if is_grip else INSERT_TYPE_HEAT
 
 
 def _addActionButtons(children, prefix, actions=ACTIONS):
@@ -580,7 +541,8 @@ def updateInfoText(inputs):
         infoText = inputs.itemById('infoText')
 
         insertName = insertSize.selectedItem.name
-        isBlindHole = tm_config.is_blind_hole(inputs)
+        holeType = inputs.itemById('holeType')
+        isBlindHole = holeType.selectedItem.name == 'Blind Hole'
 
         # Live values from the Settings group (CONFIG values until it is built)
         settings = tm_config.read_settings_inputs(inputs)

@@ -106,12 +106,14 @@ def build_args(recorder, insert_name, point_count):
 
     item = MagicMock()
     item.name = insert_name
+    blind = MagicMock()
+    blind.name = 'Blind Hole'
+
     inputs = {
         'bodySelect': selection_input([body]),
         'pointSelect': selection_input(points),
         'insertSize': plain(selectedItem=item),
-        'holeBlind': plain(value=True),
-        'holeThrough': plain(value=False),
+        'holeType': plain(selectedItem=blind),
         'addChamfer': plain(value=False),
         'addBottomRadius': plain(value=False),
         'exportDebug': None,
