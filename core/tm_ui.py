@@ -64,9 +64,12 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             # Keep the dialog small enough to land on screen. A 600px minimum
             # height pushed the window off the bottom on a fresh session; the
             # parameters now sit in groups that start collapsed, so it fits.
-            cmd.setDialogMinimumSize(320, 300)
+            cmd.setDialogMinimumSize(300, 300)
             try:
-                cmd.setDialogInitialSize(400, 560)
+                # Fusion sizes the label column to the longest label and gives the
+                # rest to the value box, so a narrower dialog is what stops the
+                # spinners running on for half the width.
+                cmd.setDialogInitialSize(340, 560)
             except Exception:
                 pass
 
@@ -102,12 +105,7 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             # decides both the size list and which parameter group is on screen.
             lastSelected = tm_state.CONFIG.get('last_selected_insert', '')
             isGrip = lastSelected in tm_state.GRIP_RIDGE_INSERTS
-            _addToggleRow(
-                inputs, 'insertType', 'Insert Type',
-                [(INSERT_TYPE_HEAT, HEAT_ICONS), (INSERT_TYPE_GRIP, GRIP_ICONS)],
-                1 if isGrip else 0,
-                'Heat-set inserts are melted into a plain bore. Grip ridges are '
-                'printed ridges a screw forms its own thread against.')
+            _addInsertTypeInput(inputs, isGrip)
 
             # Insert size, refilled whenever the type changes
             insertDropdown = inputs.addDropDownCommandInput(
@@ -246,26 +244,40 @@ def _fillInsertDropdown(dropdown, is_grip, preferred=None):
         items.item(0).isSelected = True
 
 
-def _addToggleRow(inputs, input_id, label, items, selected_index, tooltip):
-    """Mutually exclusive buttons, side by side.
+def _addInsertTypeInput(inputs, is_grip):
+    """Pick the insert family, showing each option's icon next to its name.
 
-    `items` is a list of (name, icon folder); a button row draws the icon and uses
-    the name as its tooltip. Falls back to a radio group, which draws the name,
-    if this build will not make a button row, so the dialog always opens.
+    A button row would be the obvious choice but it draws icons alone, with the
+    name only as hover text - which is why both buttons appeared to say the same
+    thing. A labelled-icon list is the control that shows an icon and a name
+    together. Falls back to a plain text list if the style is unavailable.
     """
+    items = ((INSERT_TYPE_HEAT, HEAT_ICONS), (INSERT_TYPE_GRIP, GRIP_ICONS))
     try:
-        row = inputs.addButtonRowCommandInput(input_id, label, False)
-        for index, (name, folder) in enumerate(items):
-            row.listItems.add(name, index == selected_index, folder)
+        picker = inputs.addDropDownCommandInput(
+            'insertType', 'Insert Type',
+            adsk.core.DropDownStyles.LabeledIconDropDownStyle)
+        for name, folder in items:
+            picker.listItems.add(name, name == _typeName(is_grip), folder)
     except Exception:
-        existing = inputs.itemById(input_id)
+        existing = inputs.itemById('insertType')
         if existing:
             existing.deleteMe()
-        row = inputs.addRadioButtonGroupCommandInput(input_id, label)
-        for index, (name, _folder) in enumerate(items):
-            row.listItems.add(name, index == selected_index)
-    row.tooltip = tooltip
-    return row
+        picker = inputs.addDropDownCommandInput(
+            'insertType', 'Insert Type',
+            adsk.core.DropDownStyles.TextListDropDownStyle)
+        for name, _folder in items:
+            picker.listItems.add(name, name == _typeName(is_grip))
+    picker.tooltip = (
+        'Heat-Set Insert: a plain bore for an insert melted in with a soldering '
+        'iron.\n'
+        'Grip Ridge: printed ridges a screw forms its own thread against, with no '
+        'insert at all.')
+    return picker
+
+
+def _typeName(is_grip):
+    return INSERT_TYPE_GRIP if is_grip else INSERT_TYPE_HEAT
 
 
 def _addActionButtons(children, prefix, actions=ACTIONS):
@@ -277,14 +289,17 @@ def _addActionButtons(children, prefix, actions=ACTIONS):
     fall back to exactly that, which is merely taller.
     """
     table_id = prefix + 'Actions'
+    # Columns in proportion to the label lengths, so the longest one is not the
+    # one that gets clipped.
+    ratio = ':'.join(str(max(len(label), 4)) for label, _suffix in actions)
     try:
-        table = children.addTableCommandInput(
-            table_id, '', len(actions), ':'.join('1' * len(actions)))
+        table = children.addTableCommandInput(table_id, '', len(actions), ratio)
         table.minimumVisibleRows = 1
         table.maximumVisibleRows = 1
         table.hasGrid = False
+        # Borders, so they read as buttons rather than loose words
         table.tablePresentationStyle = \
-            adsk.core.TablePresentationStyles.transparentBackgroundTablePresentationStyle
+            adsk.core.TablePresentationStyles.itemBorderTablePresentationStyle
         for column, (label, suffix) in enumerate(actions):
             button = table.commandInputs.addBoolValueInput(
                 prefix + suffix, label, False, '', False)

@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import adsk
 import tm_config
 import tm_state
 import tm_ui
@@ -24,10 +25,11 @@ class ListItems:
     def __init__(self):
         self._items = []
 
-    def add(self, name, isSelected, *_rest):
+    def add(self, name, isSelected, folder=None):
         item = MagicMock()
         item.name = name
         item.isSelected = isSelected
+        item.folder = folder
         self._items.append(item)
         return item
 
@@ -61,6 +63,10 @@ class Input:
 
     def addCommandInput(self, item, row, column):
         self.cells.append((item.id, row, column))
+
+    # Fusion enums are MagicMocks under test, so just remember what was set
+    tablePresentationStyle = None
+    hasGrid = None
 
     @property
     def selectedItem(self):
@@ -125,8 +131,8 @@ class Inputs:
         group.children = Inputs(self.registry, group=input_id)
         return group
 
-    def addTableCommandInput(self, input_id, name, columns, _ratio):
-        table = self._add(input_id, 'table', name=name, columns=columns)
+    def addTableCommandInput(self, input_id, name, columns, ratio):
+        table = self._add(input_id, 'table', name=name, columns=columns, ratio=ratio)
         # Fusion creates a table's cell contents in its own commandInputs
         table.commandInputs = Inputs(self.registry, group=input_id)
         return table
@@ -192,6 +198,20 @@ class TestInsertTypeToggle:
         names = [toggle.listItems.item(i).name for i in range(toggle.listItems.count)]
 
         assert names == [tm_ui.INSERT_TYPE_HEAT, tm_ui.INSERT_TYPE_GRIP]
+
+    def test_each_family_shows_its_name_beside_its_icon(self, heat_dialog):
+        """A button row would have drawn the icons alone, with the name only on
+        hover - which is why both looked like they said the same thing."""
+        toggle = heat_dialog.itemById('insertType')
+        pairs = [(toggle.listItems.item(i).name, toggle.listItems.item(i).folder)
+                 for i in range(toggle.listItems.count)]
+
+        assert pairs == [(tm_ui.INSERT_TYPE_HEAT, tm_ui.HEAT_ICONS),
+                         (tm_ui.INSERT_TYPE_GRIP, tm_ui.GRIP_ICONS)]
+
+    def test_the_tooltip_covers_both_families(self, heat_dialog):
+        said = heat_dialog.itemById('insertType').tooltip
+        assert tm_ui.INSERT_TYPE_HEAT in said and tm_ui.INSERT_TYPE_GRIP in said
 
     def test_it_opens_on_the_family_of_the_remembered_size(self, grip_dialog):
         assert tm_ui._isGripSelected(grip_dialog)
@@ -306,6 +326,21 @@ class TestActionButtons:
     def test_nothing_starts_pressed(self, grip_dialog):
         for button in tm_ui.ACTION_BUTTONS:
             assert grip_dialog.itemById(button).value is False
+
+    def test_the_widest_label_gets_the_widest_column(self, grip_dialog):
+        """Equal columns clipped "Restore User Saved" to "Restore User Sav..."."""
+        ratio = [int(part)
+                 for part in grip_dialog.itemById('gripActions').spec['ratio'].split(':')]
+        widest = max(range(len(tm_ui.ACTIONS)), key=lambda i: len(tm_ui.ACTIONS[i][0]))
+
+        assert ratio.index(max(ratio)) == widest
+
+    def test_the_buttons_are_outlined(self, grip_dialog):
+        """Borders, so they read as buttons rather than loose words."""
+        table = grip_dialog.itemById('gripActions')
+        expected = adsk.core.TablePresentationStyles.itemBorderTablePresentationStyle
+
+        assert table.tablePresentationStyle is expected
 
 
 class TestIcons:
