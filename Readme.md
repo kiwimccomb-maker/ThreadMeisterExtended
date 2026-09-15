@@ -7,13 +7,13 @@
 <img src="https://img.shields.io/badge/Distribution-GitHub%20%7C%20App%20Store-6E40C9?style=for-the-badge" alt="Distribution">
 </p>
 
-<h1 align="center">ThreadMeister Extended – Heat-Set Insert Add-in for Fusion 360</h1>
+<h1 align="center">ThreadMeister Extended – Heat-Set Insert and Grip-Ridge Add-in for Fusion 360</h1>
 
 <div align="center">
 <img src="resources/images/Title.png" alt="ThreadMeister Extended Logo" width="600">
 </div>
 
-<p align="center" style="max-width:600px; margin: 0 auto;">An add-in for Autodesk Fusion 360 that automates the creation of heat-set insert holes for 3D printing, using insert dimension recommendations from <a href="https://cnckitchen.com">CNC Kitchen</a>.</p>
+<p align="center" style="max-width:600px; margin: 0 auto;">An add-in for Autodesk Fusion 360 that automates the creation of heat-set insert holes for 3D printing, using insert dimension recommendations from <a href="https://cnckitchen.com">CNC Kitchen</a> and self-forming tapped threads using modelled grip-ridges inside a clearance hole</p>
 
 <p align="center">
 <strong>ThreadMeister Extended</strong> is an extended fork of the original <a href="https://github.com/AndreasOKircher/ThreadMeister">ThreadMeister</a> by <strong>Andreas Kircher</strong>, adding <strong>Grip Ridge</strong> insert holes and in-dialog configuration.<br>
