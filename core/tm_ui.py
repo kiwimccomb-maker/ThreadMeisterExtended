@@ -16,6 +16,18 @@ from tm_execute import CommandExecuteHandler
 INSERT_TYPE_HEAT = 'Heat-Set Insert'
 INSERT_TYPE_GRIP = 'Grip Ridge'
 
+# Fusion sizes the label column to the widest label and hands whatever is left to
+# the value box, with no ratio to set anywhere. Padding the labels is the lever:
+# a wider label column is a narrower box. Non-breaking spaces, so they are not
+# trimmed off the end before they can do anything.
+LABEL_PAD = '\u00a0' * 10
+
+
+def _padded(label):
+    """A label with trailing space, to hold the value box back."""
+    return label + LABEL_PAD
+
+
 # Insert type icons, resolved by Fusion relative to the add-in folder. This is
 # the one place a button row earns its keep, because the two families have
 # drawings that say more than their names do.
@@ -71,7 +83,9 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
                 # Fusion sizes the label column to the longest label and gives the
                 # rest to the value box, so a narrower dialog is what stops the
                 # spinners running on for half the width.
-                cmd.setDialogInitialSize(320, 560)
+                # Wide enough for the action buttons; the label padding above is
+                # what keeps the value boxes from taking the extra room.
+                cmd.setDialogInitialSize(360, 560)
             except Exception:
                 pass
 
@@ -373,19 +387,19 @@ def _addHeatInsertGroup(inputs, visible):
                       'than a sharp corner. Blind holes only.')
 
     size = children.addFloatSpinnerCommandInput(
-        'setChamferSize', 'Chamfer (mm)', '', 0.1, 5.0, 0.1,
+        'setChamferSize', _padded('Chamfer (mm)'), '', 0.1, 5.0, 0.1,
         tm_state.CONFIG['chamfer_size'])
     size.tooltip = ('How far the top chamfer cuts back. Larger gives the insert an '
                     'easier start but leaves less material around the mouth.')
 
     depth = children.addFloatSpinnerCommandInput(
-        'setExtraDepth', 'Extra Depth (mm)', '', 0.0, 10.0, 0.1,
+        'setExtraDepth', _padded('Extra Depth (mm)'), '', 0.0, 10.0, 0.1,
         tm_state.CONFIG['blind_hole_extra_depth'])
     depth.tooltip = ('Clearance cut below the insert so it seats fully and displaced '
                      'plastic has somewhere to go.')
 
     radius = children.addFloatSpinnerCommandInput(
-        'setBottomRadius', 'Fillet Radius (mm)', '', 0.0, 5.0, 0.1,
+        'setBottomRadius', _padded('Fillet Radius (mm)'), '', 0.0, 5.0, 0.1,
         tm_state.CONFIG['bottom_radius_size'])
     radius.tooltip = 'Radius of the bottom fillet, when Add Bottom Fillet is on.'
 
@@ -414,7 +428,7 @@ def _addGripRidgeGroup(inputs, insert_name):
 
     group = inputs.addGroupCommandInput('gripRidgeGroup', 'Grip Ridge Parameters')
     holeDepth = group.children.addFloatSpinnerCommandInput(
-        'gripEdgeDepth', 'Hole Depth (mm)', '', 0.1, 100.0, 0.5, depth)
+        'gripEdgeDepth', _padded('Hole Depth (mm)'), '', 0.1, 100.0, 0.5, depth)
     holeDepth.tooltip = ('How deep to cut. The usual thing to change: deeper gives '
                          'the screw more ridge to bite into, within the wall '
                          'thickness you have.')
@@ -424,34 +438,34 @@ def _addGripRidgeGroup(inputs, insert_name):
     shaped = shape.children
 
     clearanceInput = shaped.addFloatSpinnerCommandInput(
-        'gripClearanceDia', 'Clearance \u00d8 (mm)', '', 0.1, 50.0, 0.1, clearance)
+        'gripClearanceDia', _padded('Clearance \u00d8 (mm)'), '', 0.1, 50.0, 0.1, clearance)
     clearanceInput.tooltip = ('Diameter of the plain bore the ridges sit in. It should '
                               'clear the screw; the ridges do the gripping, not the bore.')
 
     ridgeInput = shaped.addFloatSpinnerCommandInput(
-        'gripRidgeDia', 'Ridge \u00d8 (mm)', '', 0.1, 20.0, 0.1, ridge_dia)
+        'gripRidgeDia', _padded('Ridge \u00d8 (mm)'), '', 0.1, 20.0, 0.1, ridge_dia)
     ridgeInput.tooltip = ('Diameter of each ridge circle. Larger makes a fatter ridge '
                           'that necessarily protrudes further into the bore, so the '
                           'screw cuts more thread but drives harder.')
 
     offsetInput = shaped.addFloatSpinnerCommandInput(
-        'gripArcDistance', 'Ridge Offset (mm)', '', 0.1, 50.0, 0.05, arc_distance)
+        'gripArcDistance', _padded('Ridge Offset (mm)'), '', 0.1, 50.0, 0.05, arc_distance)
     offsetInput.tooltip = ('How far each ridge circle sits from the hole centre. '
                            'Moving it further out pulls the ridge back towards the '
                            'bore wall, so it protrudes into the bore less.')
 
     countInput = shaped.addIntegerSpinnerCommandInput(
-        'gripCount', 'Ridge Count', 1, 12, 1, int(count))
+        'gripCount', _padded('Ridge Count'), 1, 12, 1, int(count))
     countInput.tooltip = ('How many ridges around the bore. More spreads the load, '
                           'but too many for the diameter run into each other.')
 
     chamferInput = shaped.addFloatSpinnerCommandInput(
-        'gripEdgeChamfer', 'Ridge Chamfer (mm)', '', 0.0, 5.0, 0.05, chamfer)
+        'gripEdgeChamfer', _padded('Ridge Chamfer (mm)'), '', 0.0, 5.0, 0.05, chamfer)
     chamferInput.tooltip = ('Break the top edge of each ridge so the screw leads in '
                             'instead of catching on it.')
 
     angleInput = shaped.addFloatSpinnerCommandInput(
-        'setGripChamferAngle', 'Chamfer Angle (deg)', '', 15.0, 85.0, 1.0,
+        'setGripChamferAngle', _padded('Chamfer Angle (deg)'), '', 15.0, 85.0, 1.0,
         tm_state.CONFIG['grip_chamfer_angle'])
     angleInput.tooltip = ('Angle of that lead-in, measured from the face. Shallower '
                           'gives a longer, gentler lead-in.')

@@ -290,6 +290,32 @@ class TestGrouping:
             assert not heat_dialog.itemById(input_id).isVisible, input_id
 
 
+class TestLabelPadding:
+    """Fusion gives the value box whatever the label column does not take, and
+    offers no ratio, so the labels are padded to hold the boxes back."""
+
+    def parameters(self, dialog):
+        ids = set(tm_config.GRIP_RIDGE_INPUTS) | set(tm_config.SETTINGS_INPUTS)
+        return {i: dialog.itemById(i) for i in ids
+                if dialog.itemById(i).kind in ('float', 'int')}
+
+    def test_every_parameter_label_is_padded(self, grip_dialog):
+        for input_id, item in self.parameters(grip_dialog).items():
+            assert item.spec['name'].endswith(tm_ui.LABEL_PAD), input_id
+
+    def test_the_padding_is_not_the_whole_label(self, grip_dialog):
+        """It has to still read as words, not as a gap."""
+        for input_id, item in self.parameters(grip_dialog).items():
+            visible = item.spec['name'].replace(tm_ui.LABEL_PAD, '').strip()
+            assert len(visible) > 3, f'{input_id} reads as {visible!r}'
+
+    def test_the_padding_is_non_breaking(self):
+        """Plain trailing spaces are the sort of thing a UI trims off before they
+        can widen anything."""
+        assert tm_ui.LABEL_PAD
+        assert set(tm_ui.LABEL_PAD) == {' '}
+
+
 class TestTooltips:
 
     @pytest.mark.parametrize('input_id', sorted(
