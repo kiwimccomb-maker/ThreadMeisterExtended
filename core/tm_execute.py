@@ -88,11 +88,11 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
             exportDebugInput = inputs.itemById('exportDebug')
             shouldExport = exportDebugInput is not None and exportDebugInput.value
 
-            # Settings group: apply before anything reads CONFIG so the change
-            # lands on this run too, then persist it to config.ini.
-            settings = tm_config.read_settings_inputs(inputs)
-            tm_state.CONFIG.update(settings)
-            tm_config.save_settings(settings)
+            # Apply the dialog's parameters before anything reads CONFIG, so the
+            # values on screen are the ones this run uses. They are not written to
+            # config.ini here: that is what the Save button is for, so a one-off
+            # tweak stays a one-off.
+            tm_state.CONFIG.update(tm_config.read_settings_inputs(inputs))
 
             targetBody = bodySelect.selection(0).entity
             selectedPoints = [pointSelect.selection(i).entity for i in range(pointSelect.selectionCount)]
@@ -111,10 +111,8 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
             is_grip_ridge = insertName in tm_state.GRIP_RIDGE_INSERTS
 
             if is_grip_ridge:
-                # Grip Ridge group: apply to this run, then persist the row
+                # The values on screen, which the Save button persists separately
                 spec = tm_config.read_grip_inputs(inputs, insertName)
-                tm_state.GRIP_RIDGE_INSERTS[insertName] = spec
-                tm_config.save_grip_ridge_insert(insertName, spec)
                 (clearanceDia, gripDepthMm, gripChamferSize,
                  gripRidgeDia, gripArcDistance, gripCount) = spec
                 holeDia = clearanceDia

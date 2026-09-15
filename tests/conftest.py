@@ -127,25 +127,58 @@ class RecordingInputs:
         self.integers = {}
         self.bools = {}
         self.groups = {}
+        self.tooltips = {}
+        self.order = []
+        self.collapsed = {}
+
+    def _record_tooltip(self, input_id):
+        self.order.append(input_id)
+        holder = self
+
+        class _Input:
+            id = input_id
+            value = None
+
+            def __setattr__(self, name, val):
+                if name == 'tooltip':
+                    holder.tooltips[input_id] = val
+                else:
+                    object.__setattr__(self, name, val)
+
+        return _Input()
 
     def addGroupCommandInput(self, input_id, name):
-        group = MagicMock()
-        group.children = self
+        holder = self
         self.groups[input_id] = name
-        return group
+        self.collapsed[input_id] = False
+
+        class _Group:
+            children = holder
+            isVisible = True
+
+            def __setattr__(self, attr, val):
+                if attr == 'isExpanded':
+                    holder.collapsed[input_id] = not val
+                else:
+                    object.__setattr__(self, attr, val)
+
+        return _Group()
 
     def addFloatSpinnerCommandInput(self, input_id, name, unit, minimum,
                                     maximum, step, initial):
         self.spinners[input_id] = {'name': name, 'unit': unit, 'min': minimum,
                                    'max': maximum, 'step': step, 'initial': initial}
+        return self._record_tooltip(input_id)
 
     def addIntegerSpinnerCommandInput(self, input_id, name, minimum, maximum,
                                       step, initial):
         self.integers[input_id] = {'name': name, 'min': minimum, 'max': maximum,
                                    'step': step, 'initial': initial}
+        return self._record_tooltip(input_id)
 
     def addBoolValueInput(self, input_id, name, _has_icon, _folder, initial):
         self.bools[input_id] = {'name': name, 'initial': initial}
+        return self._record_tooltip(input_id)
 
 
 @pytest.fixture

@@ -386,18 +386,32 @@ def save_checkbox_states(chamfer_state, radius_state, show_message_state, is_bli
     }}, config_file)
 
 
-# Design parameters the dialog's Settings group can edit, in dialog order:
+# Design parameters the dialog can edit:
 #   command input id -> (CONFIG key, config.ini section)
-# The spinner ranges in tm_ui match the validation in load_config(), so a value
-# entered here can never be one the next load would reject.
-SETTINGS_INPUTS = {
+# Split by the group each one is shown in, so a group's Restore Defaults resets
+# only its own inputs. The spinner ranges in tm_ui match the validation in
+# load_config(), so a value entered here can never be one the next load rejects.
+
+# Shown in Heat Insert Parameters
+HEAT_INSERT_INPUTS = {
     'setChamferSize': ('chamfer_size', 'Settings'),
     'setExtraDepth': ('blind_hole_extra_depth', 'Settings'),
     'setBottomRadius': ('bottom_radius_size', 'Settings'),
+}
+
+# Shown in Grip Ridge Parameters. Global rather than per-insert, unlike the
+# GRIP_RIDGE_INPUTS spec values, but it belongs beside them.
+GRIP_GLOBAL_INPUTS = {
     'setGripChamferAngle': ('grip_chamfer_angle', 'Settings'),
+}
+
+# Shown in General, and relevant whichever insert type is chosen
+GENERAL_INPUTS = {
     'setShowMessage': ('show_success_message', 'UI State'),
     'setEnableLogging': ('enable_logging', 'Developer'),
 }
+
+SETTINGS_INPUTS = {**HEAT_INSERT_INPUTS, **GRIP_GLOBAL_INPUTS, **GENERAL_INPUTS}
 
 
 # Per-insert grip ridge parameters the dialog can edit. Order matches the
@@ -431,6 +445,40 @@ def save_grip_ridge_insert(insert_name, spec, config_file=None):
     """Persist one [GripRidgeInserts] row from a spec tuple."""
     row = ', '.join(str(value) for value in spec)
     return save_values({'GripRidgeInserts': {insert_name: row}}, config_file)
+
+
+def saved_settings(config_file=None):
+    """The settings as config.ini has them, ignoring anything edited since.
+
+    Restore User Saved has to mean the file, not the in-memory CONFIG, which the
+    dialog and a previous run will both have written over.
+    """
+    config = _read_config_file(config_file or _get_config_path())
+    defaults = tm_state.DEFAULT_CONFIG
+    values = {}
+    for _input_id, (key, section) in SETTINGS_INPUTS.items():
+        getter = 'boolean' if isinstance(defaults[key], bool) else 'float'
+        values[key] = _get(config, key, section, defaults[key], getter)
+    return values
+
+
+def saved_grip_spec(insert_name, config_file=None):
+    """One [GripRidgeInserts] row as config.ini has it, or None if it has none."""
+    config = _read_config_file(config_file or _get_config_path())
+    if not config.has_section('GripRidgeInserts'):
+        return None
+    for name in config.options('GripRidgeInserts'):
+        if name != insert_name:
+            continue
+        parts = [x.strip() for x in config.get('GripRidgeInserts', name).split(',')]
+        if len(parts) != 6:
+            return None
+        try:
+            return (float(parts[0]), float(parts[1]), float(parts[2]),
+                    float(parts[3]), float(parts[4]), int(parts[5]))
+        except ValueError:
+            return None
+    return None
 
 
 def default_grip_spec(insert_name):

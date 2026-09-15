@@ -12,6 +12,26 @@ from tm_helpers import calc_blind_hole_depth_mm
 from tm_execute import CommandExecuteHandler
 
 
+# The two insert families the dialog switches between
+INSERT_TYPE_HEAT = 'Heat-Set Insert'
+INSERT_TYPE_GRIP = 'Grip Ridge'
+
+# Buttons that act immediately and then clear themselves
+ACTION_BUTTONS = (
+    'heatRestoreDefaults', 'heatSave', 'heatRestoreSaved',
+    'gripRestoreDefaults', 'gripSave', 'gripRestoreSaved',
+    'generalSave',
+)
+
+# Anything that changes what the info panel should say
+REFRESH_INFO_ON = (
+    ('insertType', 'insertSize', 'holeType', 'addChamfer')
+    + tuple(tm_config.SETTINGS_INPUTS)
+    + tm_config.GRIP_RIDGE_INPUTS
+    + ACTION_BUTTONS
+)
+
+
 class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
     def notify(self, args):
         try:
@@ -20,8 +40,14 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
 
             cmd = args.command
             
-            # Set dialog size to properly display all labels and options
-            cmd.setDialogMinimumSize(350, 600)
+            # Keep the dialog small enough to land on screen. A 600px minimum
+            # height pushed the window off the bottom on a fresh session; the
+            # parameters now sit in groups that start collapsed, so it fits.
+            cmd.setDialogMinimumSize(320, 300)
+            try:
+                cmd.setDialogInitialSize(400, 560)
+            except Exception:
+                pass
 
             onExecute = CommandExecuteHandler()
             cmd.execute.add(onExecute)
@@ -39,81 +65,59 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             inputs = cmd.commandInputs
 
             # Target body selection
-            inputs.addSelectionInput('bodySelect', 'Target Body',
-                                     'Select the solid body to cut into')
-            # The selection filter and limits are set below after creation
-            bodySelect = inputs.itemById('bodySelect')
+            bodySelect = inputs.addSelectionInput(
+                'bodySelect', 'Target Body', 'Select the solid body to cut into')
             bodySelect.addSelectionFilter('SolidBodies')
             bodySelect.setSelectionLimits(1, 1)
 
             # Sketch point selection
-            inputs.addSelectionInput('pointSelect', 'Sketch Point(s)',
-                                     'Select sketch point(s) where holes will be created')
-            pointSelect = inputs.itemById('pointSelect')
+            pointSelect = inputs.addSelectionInput(
+                'pointSelect', 'Sketch Point(s)',
+                'Select sketch point(s) where holes will be created')
             pointSelect.addSelectionFilter('SketchPoints')
             pointSelect.setSelectionLimits(1, 0)
 
-            # Insert size dropdown
-            inputs.addDropDownCommandInput('insertSize', 'Insert Size',
-                                           adsk.core.DropDownStyles.TextListDropDownStyle)
-            insertDropdown = inputs.itemById('insertSize')
-            insertList = insertDropdown.listItems
+            # Insert type: the two families have different parameters, so this
+            # decides both the size list and which parameter group is on screen.
+            lastSelected = tm_state.CONFIG.get('last_selected_insert', '')
+            isGrip = lastSelected in tm_state.GRIP_RIDGE_INSERTS
+            _addToggleRow(
+                inputs, 'insertType', 'Insert Type',
+                [INSERT_TYPE_HEAT, INSERT_TYPE_GRIP], 1 if isGrip else 0,
+                'Heat-set inserts are melted into a plain bore. Grip ridges are '
+                'printed ridges a screw forms its own thread against.')
 
-            lastSelected = tm_state.CONFIG.get('last_selected_insert', 'M3 x 5.7mm (standard)')
-            foundLastSelected = False
+            # Insert size, refilled whenever the type changes
+            insertDropdown = inputs.addDropDownCommandInput(
+                'insertSize', 'Insert Size',
+                adsk.core.DropDownStyles.TextListDropDownStyle)
+            insertDropdown.tooltip = (
+                'Which size to cut. The list follows the insert type above.')
+            _fillInsertDropdown(insertDropdown, isGrip, lastSelected)
+            lastSelected = _selectedName(insertDropdown) or lastSelected
 
-            for name in tm_state.INSERT_SPECS.keys():
-                isSelected = (name == lastSelected)
-                if isSelected:
-                    foundLastSelected = True
-                insertList.add(name, isSelected)
+            # Hole type, side by side and mutually exclusive
+            _addToggleRow(
+                inputs, 'holeType', 'Hole Type',
+                ['Blind Hole', 'Through Hole'],
+                0 if tm_state.CONFIG.get('hole_type_blind', True) else 1,
+                'Blind stops at the calculated depth. Through cuts the whole body.')
 
-            for name in tm_state.GRIP_RIDGE_INSERTS.keys():
-                isSelected = (name == lastSelected)
-                if isSelected:
-                    foundLastSelected = True
-                insertList.add(name, isSelected)
-
-            if not foundLastSelected and insertList.count > 0:
-                insertList.item(0).isSelected = True
-                lastSelected = insertList.item(0).name
-
-            # Hole type
-            holeTypeGroup = inputs.addRadioButtonGroupCommandInput('holeType', 'Hole Type')
-            saved_is_blind = tm_state.CONFIG.get('hole_type_blind', True)
-            holeTypeGroup.listItems.add('Blind Hole', saved_is_blind)
-            holeTypeGroup.listItems.add('Through Hole', not saved_is_blind)
-
-            # Grip ridge parameters (only shown while a Grip insert is selected)
+            _addHeatInsertGroup(inputs, not isGrip)
             _addGripRidgeGroup(inputs, lastSelected)
-
-            # Chamfer option
-            inputs.addBoolValueInput('addChamfer',
-                                     'Add Chamfer',
-                                     True, '',
-                                     tm_state.CONFIG['chamfer_enabled_default'])
-
-            # Bottom radius option
-            inputs.addBoolValueInput('addBottomRadius',
-                                     'Add Bottom Fillet',
-                                     True, '',
-                                     tm_state.CONFIG['bottom_radius_enabled_default'])
+            _addGeneralGroup(inputs)
 
             # Info text
             inputs.addTextBoxCommandInput('infoText', '', '', 5, True)
 
-            # Settings: edit the config.ini design parameters without leaving
-            # Fusion. Collapsed by default; applied to this run and saved on OK.
-            _addSettingsGroup(inputs)
-
             # Developer: debug export (only visible when enabled in config.ini)
             if tm_state.CONFIG.get('enable_debug_export', False):
-                inputs.addBoolValueInput('exportDebug',
-                                         'Export Debug JSON (saves fixture to debug_exports/)',
-                                         True, '',
-                                         False)
+                inputs.addBoolValueInput(
+                    'exportDebug',
+                    'Export Debug JSON (saves fixture to debug_exports/)',
+                    True, '', False)
 
-            # Last, so the info text reflects the Settings group's values
+            # Last, so the info text reflects every group's values
             updateInfoText(inputs)
 
         except Exception:
@@ -123,48 +127,44 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
 class InputChangedHandler(adsk.core.InputChangedEventHandler):
     def notify(self, args):
         try:
-            inputs = args.inputs
             changedInput = args.input
+            # Deliberately not args.inputs: for an input inside a group, that is the
+            # group's own children, in which the top-level ids do not exist. Reading
+            # it was what made Restore Defaults raise AttributeError on
+            # itemById('insertSize').
+            inputs = args.firingEvent.sender.commandInputs
+            changedId = changedInput.id
 
             # Auto-focus on point selection after body is selected
-            if changedInput.id == 'bodySelect':
+            if changedId == 'bodySelect':
                 bodySelect = inputs.itemById('bodySelect')
-                if bodySelect.selectionCount > 0:
+                if bodySelect and bodySelect.selectionCount > 0:
                     pointSelect = inputs.itemById('pointSelect')
-                    pointSelect.isEnabled = True
-                    pointSelect.hasFocus = True
+                    if pointSelect:
+                        pointSelect.isEnabled = True
+                        pointSelect.hasFocus = True
 
-            # Show the grip ridge group and reload it for the chosen insert
-            if changedInput.id == 'insertSize':
-                insertName = inputs.itemById('insertSize').selectedItem.name
-                isGrip = insertName in tm_state.GRIP_RIDGE_INSERTS
-                group = inputs.itemById('gripRidgeGroup')
-                if group:
-                    group.isVisible = isGrip
-                if isGrip:
-                    spec = tm_state.GRIP_RIDGE_INSERTS[insertName]
-                    for index, input_id in enumerate(tm_config.GRIP_RIDGE_INPUTS):
-                        _setValue(inputs, input_id, spec[index])
+            # Switching family refills the size list and swaps the visible group
+            if changedId == 'insertType':
+                isGrip = _isGripSelected(inputs)
+                dropdown = inputs.itemById('insertSize')
+                if dropdown:
+                    _fillInsertDropdown(
+                        dropdown, isGrip, tm_state.CONFIG.get('last_selected_insert', ''))
+                    _loadGripSpec(inputs, _selectedName(dropdown))
+                _applyTypeVisibility(inputs, isGrip)
 
-            # Restore Defaults acts as a button: reset the group, untick, and
-            # let the user see the result before committing with OK.
-            if changedInput.id == 'setRestoreDefaults' and changedInput.value:
-                for input_id, (key, _section) in tm_config.SETTINGS_INPUTS.items():
-                    _setValue(inputs, input_id, tm_state.DEFAULT_CONFIG[key])
+            # A different size within the same family
+            if changedId == 'insertSize':
+                _loadGripSpec(inputs, _selectedName(inputs.itemById('insertSize')))
+
+            # Action buttons act at once so the result is visible, then clear
+            # themselves so they read as buttons rather than settings left on.
+            if changedId in ACTION_BUTTONS and changedInput.value:
+                _runAction(inputs, changedId)
                 changedInput.value = False
 
-            if changedInput.id == 'gripRestoreDefaults' and changedInput.value:
-                insertName = inputs.itemById('insertSize').selectedItem.name
-                spec = tm_config.default_grip_spec(insertName)
-                if spec:
-                    for index, input_id in enumerate(tm_config.GRIP_RIDGE_INPUTS):
-                        _setValue(inputs, input_id, spec[index])
-                changedInput.value = False
-
-            if changedInput.id in (('insertSize', 'holeType', 'addChamfer',
-                                    'setChamferSize', 'setExtraDepth', 'setGripChamferAngle',
-                                    'setRestoreDefaults', 'gripRestoreDefaults')
-                                   + tm_config.GRIP_RIDGE_INPUTS):
+            if changedId in REFRESH_INFO_ON:
                 updateInfoText(inputs)
 
         except Exception:
@@ -194,75 +194,279 @@ def _setValue(inputs, input_id, value):
         command_input.value = value
 
 
-def _addGripRidgeGroup(inputs, insert_name):
-    """Add the per-insert Grip Ridge parameters from [GripRidgeInserts].
+def _valueOf(inputs, input_id, fallback):
+    command_input = inputs.itemById(input_id)
+    return command_input.value if command_input else fallback
 
-    Only visible while a Grip insert is selected. Unitless spinners, mm as
-    labelled; min/max mirror the validation in tm_config.load_config().
+
+def _selectedName(listInput):
+    """The selected item's name, or None if nothing is selected."""
+    if not listInput:
+        return None
+    item = listInput.selectedItem
+    return item.name if item else None
+
+
+def _isGripSelected(inputs):
+    """True when the Grip Ridge family is chosen."""
+    return _selectedName(inputs.itemById('insertType')) == INSERT_TYPE_GRIP
+
+
+def _fillInsertDropdown(dropdown, is_grip, preferred=None):
+    """Refill the size list for one insert family, keeping the preferred size."""
+    names = list(tm_state.GRIP_RIDGE_INSERTS if is_grip else tm_state.INSERT_SPECS)
+    items = dropdown.listItems
+    items.clear()
+    for name in names:
+        items.add(name, name == preferred)
+    if items.count and not any(items.item(i).isSelected for i in range(items.count)):
+        items.item(0).isSelected = True
+
+
+def _addToggleRow(inputs, input_id, label, names, selected_index, tooltip):
+    """Mutually exclusive buttons, side by side.
+
+    Falls back to a radio group if this Fusion build will not build a button row
+    without icon resources, so the dialog always opens.
+    """
+    try:
+        row = inputs.addButtonRowCommandInput(input_id, label, False)
+        for index, name in enumerate(names):
+            row.listItems.add(name, index == selected_index, '')
+    except Exception:
+        existing = inputs.itemById(input_id)
+        if existing:
+            existing.deleteMe()
+        row = inputs.addRadioButtonGroupCommandInput(input_id, label)
+        for index, name in enumerate(names):
+            row.listItems.add(name, index == selected_index)
+    row.tooltip = tooltip
+    return row
+
+
+def _addActionButton(children, input_id, label, tooltip):
+    """A clickable button, or a self-clearing checkbox where one is unavailable."""
+    try:
+        button = children.addBoolValueInput(input_id, label, False, '', False)
+    except Exception:
+        button = children.addBoolValueInput(input_id, label, True, '', False)
+    button.tooltip = tooltip
+    return button
+
+
+def _addActionButtons(children, prefix):
+    """Restore Defaults / Save / Restore User Saved for one parameter group."""
+    _addActionButton(
+        children, prefix + 'RestoreDefaults', 'Restore Defaults',
+        'Put these back to the values ThreadMeister ships with. Nothing is written '
+        'to config.ini until you press Save.')
+    _addActionButton(
+        children, prefix + 'Save', 'Save',
+        'Write these values to config.ini, so this is what opens next time.')
+    _addActionButton(
+        children, prefix + 'RestoreSaved', 'Restore User Saved',
+        'Drop edits made here and go back to what was last saved to config.ini.')
+
+
+def _addHeatInsertGroup(inputs, visible):
+    """Parameters that only apply to plain heat-set insert bores."""
+    group = inputs.addGroupCommandInput('heatInsertGroup', 'Heat Insert Parameters')
+    group.isExpanded = False
+    children = group.children
+
+    chamfer = children.addBoolValueInput(
+        'addChamfer', 'Add Chamfer', True, '',
+        tm_state.CONFIG['chamfer_enabled_default'])
+    chamfer.tooltip = ('Break the sharp top edge of the bore so the insert starts '
+                       'straight. Its size is added to the blind hole depth.')
+
+    fillet = children.addBoolValueInput(
+        'addBottomRadius', 'Add Bottom Fillet', True, '',
+        tm_state.CONFIG['bottom_radius_enabled_default'])
+    fillet.tooltip = ('Round the bottom of a blind hole, which prints more cleanly '
+                      'than a sharp corner. Blind holes only.')
+
+    size = children.addFloatSpinnerCommandInput(
+        'setChamferSize', 'Chamfer (mm)', '', 0.1, 5.0, 0.1,
+        tm_state.CONFIG['chamfer_size'])
+    size.tooltip = ('How far the top chamfer cuts back. Larger gives the insert an '
+                    'easier start but leaves less material around the mouth.')
+
+    depth = children.addFloatSpinnerCommandInput(
+        'setExtraDepth', 'Extra Depth (mm)', '', 0.0, 10.0, 0.1,
+        tm_state.CONFIG['blind_hole_extra_depth'])
+    depth.tooltip = ('Clearance cut below the insert so it seats fully and displaced '
+                     'plastic has somewhere to go.')
+
+    radius = children.addFloatSpinnerCommandInput(
+        'setBottomRadius', 'Fillet Radius (mm)', '', 0.0, 5.0, 0.1,
+        tm_state.CONFIG['bottom_radius_size'])
+    radius.tooltip = 'Radius of the bottom fillet, when Add Bottom Fillet is on.'
+
+    _addActionButtons(children, 'heat')
+    group.isVisible = visible
+    return group
+
+
+def _addGripRidgeGroup(inputs, insert_name):
+    """Per-insert grip ridge geometry from [GripRidgeInserts].
+
+    Hole depth sits at the top because it is the one regularly changed; the
+    geometry defining the ridge shape stays in a sub-group that starts collapsed.
+    Unitless spinners, mm as labelled, min/max mirroring load_config().
     """
     spec = tm_state.GRIP_RIDGE_INSERTS.get(insert_name)
     if spec is None:
         # Hidden anyway, but the inputs still need starting values
-        spec = next(iter(tm_state.GRIP_RIDGE_INSERTS.values()), (3.2, 7, 0.28, 1.5, 2.05, 3))
+        spec = next(iter(tm_state.GRIP_RIDGE_INSERTS.values()),
+                    (3.2, 7, 0.28, 1.5, 2.05, 3))
     clearance, depth, chamfer, ridge_dia, arc_distance, count = spec
 
     group = inputs.addGroupCommandInput('gripRidgeGroup', 'Grip Ridge Parameters')
     children = group.children
 
-    children.addFloatSpinnerCommandInput(
-        'gripClearanceDia', 'Clearance Diameter (mm)', '', 0.1, 50.0, 0.1, clearance)
-    children.addFloatSpinnerCommandInput(
+    holeDepth = children.addFloatSpinnerCommandInput(
         'gripEdgeDepth', 'Hole Depth (mm)', '', 0.1, 100.0, 0.5, depth)
-    children.addFloatSpinnerCommandInput(
-        'gripEdgeChamfer', 'Ridge Chamfer (mm)', '', 0.0, 5.0, 0.05, chamfer)
-    children.addFloatSpinnerCommandInput(
-        'gripRidgeDia', 'Ridge Diameter (mm)', '', 0.1, 20.0, 0.1, ridge_dia)
-    children.addFloatSpinnerCommandInput(
-        'gripArcDistance', 'Ridge Distance from Centre (mm)', '', 0.1, 50.0, 0.05, arc_distance)
-    children.addIntegerSpinnerCommandInput(
-        'gripCount', 'Number of Ridges', 1, 12, 1, int(count))
-    children.addBoolValueInput(
-        'gripRestoreDefaults', 'Restore Defaults', True, '', False)
+    holeDepth.tooltip = ('How deep to cut. The usual thing to change: deeper gives '
+                         'the screw more ridge to bite into, within the wall '
+                         'thickness you have.')
 
+    shape = children.addGroupCommandInput('gripShapeGroup', 'Ridge Shape')
+    shape.isExpanded = False
+    shaped = shape.children
+
+    clearanceInput = shaped.addFloatSpinnerCommandInput(
+        'gripClearanceDia', 'Clearance \u00d8 (mm)', '', 0.1, 50.0, 0.1, clearance)
+    clearanceInput.tooltip = ('Diameter of the plain bore the ridges sit in. It should '
+                              'clear the screw; the ridges do the gripping, not the bore.')
+
+    ridgeInput = shaped.addFloatSpinnerCommandInput(
+        'gripRidgeDia', 'Ridge \u00d8 (mm)', '', 0.1, 20.0, 0.1, ridge_dia)
+    ridgeInput.tooltip = ('Diameter of each ridge circle. Larger makes a fatter ridge '
+                          'that necessarily protrudes further into the bore, so the '
+                          'screw cuts more thread but drives harder.')
+
+    offsetInput = shaped.addFloatSpinnerCommandInput(
+        'gripArcDistance', 'Ridge Offset (mm)', '', 0.1, 50.0, 0.05, arc_distance)
+    offsetInput.tooltip = ('How far each ridge circle sits from the hole centre. '
+                           'Moving it further out pulls the ridge back towards the '
+                           'bore wall, so it protrudes into the bore less.')
+
+    countInput = shaped.addIntegerSpinnerCommandInput(
+        'gripCount', 'Ridge Count', 1, 12, 1, int(count))
+    countInput.tooltip = ('How many ridges around the bore. More spreads the load, '
+                          'but too many for the diameter run into each other.')
+
+    chamferInput = shaped.addFloatSpinnerCommandInput(
+        'gripEdgeChamfer', 'Ridge Chamfer (mm)', '', 0.0, 5.0, 0.05, chamfer)
+    chamferInput.tooltip = ('Break the top edge of each ridge so the screw leads in '
+                            'instead of catching on it.')
+
+    angleInput = shaped.addFloatSpinnerCommandInput(
+        'setGripChamferAngle', 'Chamfer Angle (deg)', '', 15.0, 85.0, 1.0,
+        tm_state.CONFIG['grip_chamfer_angle'])
+    angleInput.tooltip = ('Angle of that lead-in, measured from the face. Shallower '
+                          'gives a longer, gentler lead-in.')
+
+    _addActionButtons(children, 'grip')
     group.isVisible = insert_name in tm_state.GRIP_RIDGE_INSERTS
     return group
 
 
-def _addSettingsGroup(inputs):
-    """Add the collapsed Settings group that edits config.ini design parameters.
-
-    These spinners are unitless on purpose: `.value` is the number shown, in mm
-    or degrees, with no Fusion-internal cm/radian conversion to get wrong. The
-    grip depth spinner above is the exception and is declared in 'mm'.
-
-    Min/max mirror the validation in tm_config.load_config().
-    """
-    group = inputs.addGroupCommandInput('settingsGroup', 'Settings')
+def _addGeneralGroup(inputs):
+    """Options that apply whichever insert type is chosen."""
+    group = inputs.addGroupCommandInput('generalGroup', 'General')
     group.isExpanded = False
     children = group.children
 
-    children.addFloatSpinnerCommandInput(
-        'setChamferSize', 'Chamfer Size (mm)', '',
-        0.1, 5.0, 0.1, tm_state.CONFIG['chamfer_size'])
-    children.addFloatSpinnerCommandInput(
-        'setExtraDepth', 'Blind Hole Extra Depth (mm)', '',
-        0.0, 10.0, 0.1, tm_state.CONFIG['blind_hole_extra_depth'])
-    children.addFloatSpinnerCommandInput(
-        'setBottomRadius', 'Bottom Fillet Radius (mm)', '',
-        0.0, 5.0, 0.1, tm_state.CONFIG['bottom_radius_size'])
-    children.addFloatSpinnerCommandInput(
-        'setGripChamferAngle', 'Grip Chamfer Angle (deg)', '',
-        15.0, 85.0, 1.0, tm_state.CONFIG['grip_chamfer_angle'])
-    children.addBoolValueInput(
+    message = children.addBoolValueInput(
         'setShowMessage', 'Show Success Message', True, '',
         tm_state.CONFIG.get('show_success_message', True))
-    children.addBoolValueInput(
+    message.tooltip = 'Confirm with a dialog after a run that had no failures.'
+
+    logging = children.addBoolValueInput(
         'setEnableLogging', 'Enable Logging', True, '',
         tm_state.CONFIG.get('enable_logging', False))
-    children.addBoolValueInput(
-        'setRestoreDefaults', 'Restore Defaults', True, '', False)
+    logging.tooltip = 'Write diagnostics to the Text Commands palette.'
 
+    _addActionButton(children, 'generalSave', 'Save',
+                     'Write these two options to config.ini.')
     return group
+
+
+def _applyTypeVisibility(inputs, is_grip):
+    """Only the chosen family's parameters stay on screen."""
+    heat = inputs.itemById('heatInsertGroup')
+    grip = inputs.itemById('gripRidgeGroup')
+    if heat:
+        heat.isVisible = not is_grip
+    if grip:
+        grip.isVisible = is_grip
+
+
+def _writeGripSpec(inputs, spec):
+    for index, input_id in enumerate(tm_config.GRIP_RIDGE_INPUTS):
+        _setValue(inputs, input_id, spec[index])
+
+
+def _writeSettings(inputs, values, which):
+    for input_id, (key, _section) in which.items():
+        if key in values:
+            _setValue(inputs, input_id, values[key])
+
+
+def _loadGripSpec(inputs, insert_name):
+    """Show one grip insert's stored parameters, and reveal the right group."""
+    _applyTypeVisibility(inputs, insert_name in tm_state.GRIP_RIDGE_INSERTS)
+    spec = tm_state.GRIP_RIDGE_INSERTS.get(insert_name)
+    if spec:
+        _writeGripSpec(inputs, spec)
+
+
+def _runAction(inputs, action_id):
+    """Carry out one action button. Only Save writes config.ini."""
+    insertName = _selectedName(inputs.itemById('insertSize'))
+
+    if action_id == 'heatRestoreDefaults':
+        _writeSettings(inputs, tm_state.DEFAULT_CONFIG, tm_config.HEAT_INSERT_INPUTS)
+        _setValue(inputs, 'addChamfer',
+                  tm_state.DEFAULT_CONFIG['chamfer_enabled_default'])
+        _setValue(inputs, 'addBottomRadius',
+                  tm_state.DEFAULT_CONFIG['bottom_radius_enabled_default'])
+
+    elif action_id == 'heatRestoreSaved':
+        _writeSettings(inputs, tm_config.saved_settings(), tm_config.HEAT_INSERT_INPUTS)
+
+    elif action_id == 'heatSave':
+        tm_config.save_settings(tm_config.read_settings_inputs(inputs))
+        tm_config.save_checkbox_states(
+            _valueOf(inputs, 'addChamfer', True),
+            _valueOf(inputs, 'addBottomRadius', False),
+            _valueOf(inputs, 'setShowMessage', True),
+            tm_state.CONFIG.get('hole_type_blind', True))
+
+    elif action_id == 'gripRestoreDefaults':
+        spec = tm_config.default_grip_spec(insertName)
+        if spec:
+            _writeGripSpec(inputs, spec)
+        _writeSettings(inputs, tm_state.DEFAULT_CONFIG, tm_config.GRIP_GLOBAL_INPUTS)
+
+    elif action_id == 'gripRestoreSaved':
+        spec = tm_config.saved_grip_spec(insertName)
+        if spec:
+            _writeGripSpec(inputs, spec)
+        _writeSettings(inputs, tm_config.saved_settings(),
+                       tm_config.GRIP_GLOBAL_INPUTS)
+
+    elif action_id == 'gripSave':
+        if insertName in tm_state.GRIP_RIDGE_INSERTS:
+            spec = tm_config.read_grip_inputs(inputs, insertName)
+            tm_state.GRIP_RIDGE_INSERTS[insertName] = spec
+            tm_config.save_grip_ridge_insert(insertName, spec)
+        tm_config.save_settings(tm_config.read_settings_inputs(inputs))
+
+    elif action_id == 'generalSave':
+        tm_config.save_settings(tm_config.read_settings_inputs(inputs))
 
 
 def updateInfoText(inputs):

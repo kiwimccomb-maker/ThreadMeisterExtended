@@ -147,7 +147,21 @@ class TestGripRidgeGroup:
         """A drifted id would silently fall back to the stored spec and never save."""
         created = set(built.spinners) | set(built.integers)
 
-        assert created == set(GRIP_RIDGE_INPUTS)
+        # setGripChamferAngle is shown here too, but it is a global setting
+        assert set(GRIP_RIDGE_INPUTS) <= created, (
+            f'not built: {set(GRIP_RIDGE_INPUTS) - created}')
+
+    def test_hole_depth_comes_first(self, built):
+        """The one parameter that gets edited regularly is not buried."""
+        assert built.order[0] == 'gripEdgeDepth'
+
+    def test_the_shape_parameters_are_in_a_collapsed_sub_group(self, built):
+        """Everything but the depth stays out of the way until asked for."""
+        assert built.collapsed.get('gripShapeGroup') is True
+
+    def test_every_parameter_has_a_tooltip(self, built):
+        for input_id in GRIP_RIDGE_INPUTS:
+            assert built.tooltips.get(input_id), f'{input_id} has no tooltip'
 
     def test_inputs_open_on_the_selected_insert_spec(self, built):
         opened = tuple(

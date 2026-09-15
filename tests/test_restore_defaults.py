@@ -1,19 +1,25 @@
 """
-Tests for the Restore Defaults controls in the Settings and Grip Ridge groups.
+Tests for the Restore Defaults / Save / Restore User Saved buttons.
 
-They act like buttons: ticking one resets that group's inputs immediately and
-clears its own tick. Nothing reaches config.ini until OK, so Cancel undoes it.
+Each acts at once so the result is visible in the dialog, then clears itself so it
+reads as a button. Only Save writes config.ini.
+
+The handler reads the command's own inputs, not args.inputs: for an input inside a
+group, args.inputs is that group's children, where the top-level ids do not exist.
+Reading it raised AttributeError on itemById('insertSize').
 """
 
 from unittest.mock import MagicMock
 
 import pytest
 
+import tm_config
 import tm_state
 import tm_ui
 from tm_config import (
+    GRIP_GLOBAL_INPUTS,
     GRIP_RIDGE_INPUTS,
-    SETTINGS_INPUTS,
+    HEAT_INSERT_INPUTS,
     default_grip_spec,
     get_default_grip_ridge_inserts,
     load_config,
@@ -21,6 +27,7 @@ from tm_config import (
 
 
 M3_GRIP_DEFAULT = get_default_grip_ridge_inserts()['M3 Grip']
+EDITED_SPEC = (9.9, 9.9, 0.9, 9.9, 9.9, 11)
 
 
 class FakeInputs:
@@ -30,12 +37,18 @@ class FakeInputs:
         self.values = dict(values)
         self._selected = selected_insert
 
+    def _list_input(self, name):
+        item = MagicMock()
+        item.name = name          # MagicMock(name=...) names the mock instead
+        return MagicMock(selectedItem=item)
+
     def itemById(self, input_id):
         if input_id == 'insertSize':
-            # MagicMock(name=...) names the mock, so set .name afterwards
-            item = MagicMock()
-            item.name = self._selected
-            return MagicMock(selectedItem=item)
+            return self._list_input(self._selected)
+        if input_id == 'insertType':
+            return self._list_input(
+                tm_ui.INSERT_TYPE_GRIP if self._selected in tm_state.GRIP_RIDGE_INSERTS
+                else tm_ui.INSERT_TYPE_HEAT)
         if input_id not in self.values:
             return None
         holder = self
@@ -54,97 +67,201 @@ class FakeInputs:
         return _Input()
 
 
-def change(inputs, input_id):
-    """Fire InputChangedHandler for one input."""
+def press(inputs, input_id):
+    """Fire InputChangedHandler for one input, the way Fusion does."""
     args = MagicMock()
-    args.inputs = inputs
     args.input = inputs.itemById(input_id)
+    # The handler must reach the command's own inputs, not the group's children
+    args.firingEvent.sender.commandInputs = inputs
+    args.inputs = MagicMock(itemById=lambda _id: None)
     tm_ui.InputChangedHandler().notify(args)
 
 
 @pytest.fixture(autouse=True)
-def quiet_info_text(monkeypatch):
-    """updateInfoText needs the whole dialog; not what these tests are about."""
+def isolate(monkeypatch):
+    """updateInfoText needs the whole dialog; saving must not touch config.ini."""
     monkeypatch.setattr(tm_ui, 'updateInfoText', lambda inputs: None)
+    monkeypatch.setattr(tm_state, '_ui', MagicMock())
+    saved = {}
+    monkeypatch.setattr(tm_config, 'save_settings',
+                        lambda values, *a, **k: saved.update({'settings': values}))
+    monkeypatch.setattr(tm_config, 'save_grip_ridge_insert',
+                        lambda name, spec, *a, **k: saved.update({'grip': (name, spec)}))
+    monkeypatch.setattr(tm_config, 'save_checkbox_states', lambda *a, **k: None)
+    return saved
 
 
-class TestRestoreSettings:
+def heat_inputs(edited=True):
+    values = {'heatRestoreDefaults': False, 'heatSave': False, 'heatRestoreSaved': False,
+              'addChamfer': False, 'addBottomRadius': True}
+    for input_id, (key, _section) in HEAT_INSERT_INPUTS.items():
+        values[input_id] = tm_state.DEFAULT_CONFIG[key] + (1.0 if edited else 0.0)
+    return FakeInputs(values, selected_insert='M3 x 5.7mm (standard)')
 
-    def edited(self):
-        """Every setting moved off its default."""
-        values = {'setRestoreDefaults': False}
-        for input_id, (key, _section) in SETTINGS_INPUTS.items():
-            default = tm_state.DEFAULT_CONFIG[key]
-            values[input_id] = (not default) if isinstance(default, bool) else default + 1.0
-        return FakeInputs(values)
 
-    def test_resets_every_setting_to_its_default(self):
-        inputs = self.edited()
-        inputs.values['setRestoreDefaults'] = True
+def grip_inputs(edited=True):
+    values = {'gripRestoreDefaults': False, 'gripSave': False, 'gripRestoreSaved': False}
+    values.update(dict(zip(GRIP_RIDGE_INPUTS, EDITED_SPEC if edited else M3_GRIP_DEFAULT)))
+    for input_id, (key, _section) in GRIP_GLOBAL_INPUTS.items():
+        values[input_id] = tm_state.DEFAULT_CONFIG[key] + (1.0 if edited else 0.0)
+    return FakeInputs(values)
 
-        change(inputs, 'setRestoreDefaults')
 
-        for input_id, (key, _section) in SETTINGS_INPUTS.items():
+class TestTheCrashIsGone:
+    """itemById('insertSize') returned None because args.inputs was the group's
+    children, so .selectedItem raised AttributeError."""
+
+    @pytest.mark.parametrize('button', ['gripRestoreDefaults', 'gripSave',
+                                        'gripRestoreSaved'])
+    def test_pressing_a_grip_button_does_not_raise(self, button):
+        inputs = grip_inputs()
+        inputs.values[button] = True
+
+        press(inputs, button)
+
+        assert not tm_state._ui.messageBox.called, tm_state._ui.messageBox.call_args
+
+
+class TestRestoreDefaults:
+
+    def test_grip_resets_to_the_shipped_spec(self):
+        inputs = grip_inputs()
+        inputs.values['gripRestoreDefaults'] = True
+
+        press(inputs, 'gripRestoreDefaults')
+
+        assert tuple(inputs.values[i] for i in GRIP_RIDGE_INPUTS) == M3_GRIP_DEFAULT
+
+    def test_grip_also_resets_the_chamfer_angle(self):
+        """It moved into this group, so this button owns it."""
+        inputs = grip_inputs()
+        inputs.values['gripRestoreDefaults'] = True
+
+        press(inputs, 'gripRestoreDefaults')
+
+        assert inputs.values['setGripChamferAngle'] == tm_state.DEFAULT_CONFIG['grip_chamfer_angle']
+
+    def test_grip_restores_the_size_that_is_selected(self):
+        inputs = grip_inputs()
+        inputs._selected = 'M8 Grip'
+        inputs.values['gripRestoreDefaults'] = True
+
+        press(inputs, 'gripRestoreDefaults')
+
+        assert tuple(inputs.values[i] for i in GRIP_RIDGE_INPUTS) == \
+            get_default_grip_ridge_inserts()['M8 Grip']
+
+    def test_heat_resets_its_own_parameters(self):
+        inputs = heat_inputs()
+        inputs.values['heatRestoreDefaults'] = True
+
+        press(inputs, 'heatRestoreDefaults')
+
+        for input_id, (key, _section) in HEAT_INSERT_INPUTS.items():
             assert inputs.values[input_id] == tm_state.DEFAULT_CONFIG[key], input_id
 
-    def test_clears_its_own_tick(self):
-        """So it reads as a button rather than a setting that stays on."""
-        inputs = self.edited()
-        inputs.values['setRestoreDefaults'] = True
+    def test_heat_resets_the_chamfer_and_fillet_toggles(self):
+        inputs = heat_inputs()
+        inputs.values['heatRestoreDefaults'] = True
 
-        change(inputs, 'setRestoreDefaults')
+        press(inputs, 'heatRestoreDefaults')
 
-        assert inputs.values['setRestoreDefaults'] is False
+        assert inputs.values['addChamfer'] == tm_state.DEFAULT_CONFIG['chamfer_enabled_default']
+        assert inputs.values['addBottomRadius'] == \
+            tm_state.DEFAULT_CONFIG['bottom_radius_enabled_default']
 
-    def test_unticking_changes_nothing(self):
-        """The untick the handler itself causes must not re-run the reset."""
-        inputs = self.edited()
+    def test_restoring_defaults_writes_nothing(self, isolate):
+        inputs = grip_inputs()
+        inputs.values['gripRestoreDefaults'] = True
+
+        press(inputs, 'gripRestoreDefaults')
+
+        assert isolate == {}, 'config.ini is only written by Save'
+
+
+class TestSave:
+
+    def test_grip_save_writes_the_edited_spec(self, isolate, monkeypatch):
+        monkeypatch.setitem(tm_state.GRIP_RIDGE_INSERTS, 'M3 Grip', M3_GRIP_DEFAULT)
+        inputs = grip_inputs()
+        inputs.values['gripSave'] = True
+
+        press(inputs, 'gripSave')
+
+        assert isolate['grip'] == ('M3 Grip', EDITED_SPEC)
+
+    def test_grip_save_updates_what_the_dialog_reopens_with(self, monkeypatch):
+        monkeypatch.setitem(tm_state.GRIP_RIDGE_INSERTS, 'M3 Grip', M3_GRIP_DEFAULT)
+        inputs = grip_inputs()
+        inputs.values['gripSave'] = True
+
+        press(inputs, 'gripSave')
+
+        assert tm_state.GRIP_RIDGE_INSERTS['M3 Grip'] == EDITED_SPEC
+
+    def test_heat_save_writes_the_settings(self, isolate):
+        inputs = heat_inputs()
+        inputs.values['heatSave'] = True
+
+        press(inputs, 'heatSave')
+
+        assert 'settings' in isolate
+
+
+class TestRestoreUserSaved:
+
+    def test_grip_goes_back_to_the_saved_row(self, monkeypatch):
+        saved = (4.0, 9.0, 0.4, 2.0, 2.5, 5)
+        monkeypatch.setattr(tm_config, 'saved_grip_spec', lambda name, *a: saved)
+        monkeypatch.setattr(tm_config, 'saved_settings',
+                            lambda *a: dict(tm_state.DEFAULT_CONFIG))
+        inputs = grip_inputs()
+        inputs.values['gripRestoreSaved'] = True
+
+        press(inputs, 'gripRestoreSaved')
+
+        assert tuple(inputs.values[i] for i in GRIP_RIDGE_INPUTS) == saved
+
+    def test_heat_goes_back_to_the_saved_settings(self, monkeypatch):
+        stored = {key: 2.5 for _id, (key, _s) in HEAT_INSERT_INPUTS.items()}
+        monkeypatch.setattr(tm_config, 'saved_settings', lambda *a: stored)
+        inputs = heat_inputs()
+        inputs.values['heatRestoreSaved'] = True
+
+        press(inputs, 'heatRestoreSaved')
+
+        for input_id in HEAT_INSERT_INPUTS:
+            assert inputs.values[input_id] == 2.5
+
+    def test_an_insert_with_no_saved_row_is_left_alone(self, monkeypatch):
+        monkeypatch.setattr(tm_config, 'saved_grip_spec', lambda name, *a: None)
+        monkeypatch.setattr(tm_config, 'saved_settings',
+                            lambda *a: dict(tm_state.DEFAULT_CONFIG))
+        inputs = grip_inputs()
+        inputs.values['gripRestoreSaved'] = True
+
+        press(inputs, 'gripRestoreSaved')
+
+        assert tuple(inputs.values[i] for i in GRIP_RIDGE_INPUTS) == EDITED_SPEC
+
+
+class TestButtonsClearThemselves:
+
+    @pytest.mark.parametrize('button', ['gripRestoreDefaults', 'gripSave',
+                                        'gripRestoreSaved'])
+    def test_pressed_button_resets(self, button):
+        inputs = grip_inputs()
+        inputs.values[button] = True
+
+        press(inputs, button)
+
+        assert inputs.values[button] is False
+
+    def test_an_unpressed_button_does_nothing(self):
+        inputs = grip_inputs()
         before = dict(inputs.values)
 
-        change(inputs, 'setRestoreDefaults')
-
-        assert inputs.values == before
-
-
-class TestRestoreGripRidge:
-
-    def edited(self, selected_insert='M3 Grip'):
-        values = {'gripRestoreDefaults': False}
-        values.update(dict(zip(GRIP_RIDGE_INPUTS, (9.9, 9.9, 0.9, 9.9, 9.9, 11))))
-        return FakeInputs(values, selected_insert)
-
-    def test_resets_the_selected_insert_to_its_shipped_spec(self):
-        inputs = self.edited()
-        inputs.values['gripRestoreDefaults'] = True
-
-        change(inputs, 'gripRestoreDefaults')
-
-        restored = tuple(inputs.values[input_id] for input_id in GRIP_RIDGE_INPUTS)
-        assert restored == M3_GRIP_DEFAULT
-
-    def test_restores_the_insert_that_is_selected(self):
-        """Not whatever happened to be first in the table."""
-        inputs = self.edited(selected_insert='M8 Grip')
-        inputs.values['gripRestoreDefaults'] = True
-
-        change(inputs, 'gripRestoreDefaults')
-
-        restored = tuple(inputs.values[input_id] for input_id in GRIP_RIDGE_INPUTS)
-        assert restored == get_default_grip_ridge_inserts()['M8 Grip']
-
-    def test_clears_its_own_tick(self):
-        inputs = self.edited()
-        inputs.values['gripRestoreDefaults'] = True
-
-        change(inputs, 'gripRestoreDefaults')
-
-        assert inputs.values['gripRestoreDefaults'] is False
-
-    def test_unticking_changes_nothing(self):
-        inputs = self.edited()
-        before = dict(inputs.values)
-
-        change(inputs, 'gripRestoreDefaults')
+        press(inputs, 'gripRestoreDefaults')
 
         assert inputs.values == before
 
@@ -155,7 +272,6 @@ class TestDefaultGripSpec:
         assert default_grip_spec('M3 Grip') == M3_GRIP_DEFAULT
 
     def test_falls_back_to_the_stored_row_for_a_user_added_insert(self, monkeypatch):
-        """We ship no default for it, so its config.ini row is the best we have."""
         custom = (12.5, 16, 0.7, 4.5, 7.5, 6)
         monkeypatch.setitem(tm_state.GRIP_RIDGE_INSERTS, 'M12 Grip', custom)
 
@@ -165,18 +281,6 @@ class TestDefaultGripSpec:
         monkeypatch.delitem(tm_state.GRIP_RIDGE_INSERTS, 'Nope Grip', raising=False)
 
         assert default_grip_spec('Nope Grip') is None
-
-    def test_restore_is_a_no_op_when_there_is_no_default(self):
-        """A missing spec must leave the inputs alone rather than crash."""
-        inputs = FakeInputs(
-            dict({'gripRestoreDefaults': True},
-                 **dict(zip(GRIP_RIDGE_INPUTS, (9.9, 9.9, 0.9, 9.9, 9.9, 11)))),
-            selected_insert='Nope Grip')
-
-        change(inputs, 'gripRestoreDefaults')
-
-        assert tuple(inputs.values[i] for i in GRIP_RIDGE_INPUTS) == (9.9, 9.9, 0.9, 9.9, 9.9, 11)
-        assert inputs.values['gripRestoreDefaults'] is False
 
 
 class TestDefaultsAreOneSource:

@@ -165,16 +165,19 @@ class TestSettingsGroup:
 
     @pytest.fixture
     def built(self, recording_inputs):
+        """Every group that holds a mapped setting, recorded flat."""
         import tm_ui
-        tm_ui._addSettingsGroup(recording_inputs)
+        tm_ui._addHeatInsertGroup(recording_inputs, True)
+        tm_ui._addGripRidgeGroup(recording_inputs, 'M3 Grip')
+        tm_ui._addGeneralGroup(recording_inputs)
         return recording_inputs
 
     def test_every_mapped_setting_has_an_input(self, built):
         """A drifted id would silently fall back to CONFIG and never save."""
         created = set(built.spinners) | set(built.bools)
 
-        # setRestoreDefaults is a control, not a stored setting
-        assert created == set(SETTINGS_INPUTS) | {'setRestoreDefaults'}
+        assert set(SETTINGS_INPUTS) <= created, (
+            f'not built: {set(SETTINGS_INPUTS) - created}')
 
     def test_spinners_open_on_the_current_config_value(self, built, monkeypatch):
         assert built.spinners['setChamferSize']['initial'] == tm_state.CONFIG['chamfer_size']
@@ -185,9 +188,16 @@ class TestSettingsGroup:
         for input_id, spec in built.spinners.items():
             assert spec['unit'] == '', f'{input_id} would need a unit conversion'
 
+    def test_every_input_has_a_tooltip(self, built):
+        """Hovering has to explain what the parameter does."""
+        for input_id in set(SETTINGS_INPUTS):
+            assert built.tooltips.get(input_id), f'{input_id} has no tooltip'
+
     def test_spinner_ranges_survive_load_config(self, built, config_file):
         """Both limits of every spinner must be values load_config accepts."""
         for input_id, spec in built.spinners.items():
+            if input_id not in SETTINGS_INPUTS:
+                continue
             key, _section = SETTINGS_INPUTS[input_id]
             for limit in (spec['min'], spec['max']):
                 save_settings({key: limit}, config_file)
