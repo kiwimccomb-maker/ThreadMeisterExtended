@@ -140,7 +140,7 @@ class Inputs:
                          name=n, initial=initial)
 
     def addTextBoxCommandInput(self, i, n, text, rows, ro):
-        return self._add(i, 'textbox', name=n)
+        return self._add(i, 'textbox', name=n, text=text, readonly=ro)
 
     def addGroupCommandInput(self, input_id, name):
         group = self._add(input_id, 'group', name=name)
@@ -424,18 +424,26 @@ class TestIcons:
 
 class TestHoleType:
 
-    def test_it_is_one_bordered_row_like_the_action_buttons(self, heat_dialog):
+    def test_it_is_one_row_with_a_caption_beside_each_box(self, heat_dialog):
         table = heat_dialog.itemById('holeTypeRow')
 
         assert table.kind == 'table'
-        assert table.tablePresentationStyle is \
-            adsk.core.TablePresentationStyles.itemBorderTablePresentationStyle
         assert sorted(table.cells, key=lambda c: c[2]) == [
-            ('holeBlind', 0, 0), ('holeThrough', 0, 1)]
+            ('holeBlind', 0, 0), ('holeBlindCaption', 0, 1),
+            ('holeThrough', 0, 2), ('holeThroughCaption', 0, 3)]
 
     def test_each_option_says_what_it_is(self, heat_dialog):
-        assert [heat_dialog.cell(i).spec['name']
-                for i in ('holeBlind', 'holeThrough')] == ['Blind Hole', 'Through Hole']
+        """A checkbox in a table cell draws the box and drops its name, so the
+        caption has to be a cell of text in its own right."""
+        captions = [heat_dialog.cell(i).spec['text']
+                    for i in ('holeBlindCaption', 'holeThroughCaption')]
+
+        assert captions == ['Blind Hole', 'Through Hole']
+
+    def test_the_captions_are_read_only(self, heat_dialog):
+        """They are labels, not somewhere to type."""
+        for input_id in ('holeBlindCaption', 'holeThroughCaption'):
+            assert heat_dialog.cell(input_id).spec['readonly'] is True
 
     def test_exactly_one_option_is_selected(self, heat_dialog):
         on = [heat_dialog.cell(i).value for i in ('holeBlind', 'holeThrough')]

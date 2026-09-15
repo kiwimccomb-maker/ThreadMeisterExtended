@@ -297,46 +297,58 @@ def _typeName(is_grip):
 
 
 def _addHoleTypeRow(inputs, blind_first):
-    """Blind and Through as one bordered row, laid out like the action buttons.
+    """Blind and Through side by side, each with its name beside its box.
 
-    Checkboxes rather than buttons because a button cannot show which of the two
-    is currently chosen.
+    A bool input in a table cell only draws its name when it is a button. As a
+    checkbox it draws the box and nothing else, so the caption goes in a cell of
+    its own as read-only text, where it cannot be dropped. A checkbox rather than
+    a button because a button cannot show which of the two is currently chosen.
 
-    Returns the pair of inputs. The caller has to keep them: an input created
+    Returns the pair of toggles. The caller has to keep them: an input created
     inside a table is not found by itemById on the command's inputs, so a lookup
     would quietly return nothing and the choice would never take effect.
     """
-    labels = ('Blind Hole', 'Through Hole')
-    tips = ('Stops at the depth worked out from the insert and the settings below.',
-            'Cuts all the way through the body.')
-    ratio = ':'.join(str(len(label) + 14) for label in labels)
+    options = (('holeBlind', 'Blind Hole',
+                'Stops at the depth worked out from the insert and the settings '
+                'below.'),
+               ('holeThrough', 'Through Hole',
+                'Cuts all the way through the body.'))
 
-    def build(collection):
+    def build(collection, with_captions):
         made = []
-        for column, (label, tip) in enumerate(zip(labels, tips)):
+        for index, (input_id, label, tip) in enumerate(options):
+            chosen = (index == 0) if blind_first else (index == 1)
             toggle = collection.addBoolValueInput(
-                'holeBlind' if column == 0 else 'holeThrough',
-                label, True, '', column == (0 if blind_first else 1))
+                input_id, label, True, '', chosen)
             toggle.tooltip = tip
-            made.append(toggle)
+            caption = None
+            if with_captions:
+                caption = collection.addTextBoxCommandInput(
+                    input_id + 'Caption', '', label, 1, True)
+                caption.tooltip = tip
+            made.append((toggle, caption))
         return made
 
     try:
-        table = inputs.addTableCommandInput('holeTypeRow', 'Hole Type', 2, ratio)
+        # box, caption, box, caption - the captions get the room
+        table = inputs.addTableCommandInput('holeTypeRow', 'Hole Type', 4, '1:6:1:6')
         table.minimumVisibleRows = 1
         table.maximumVisibleRows = 1
         table.hasGrid = False
         table.tablePresentationStyle = \
-            adsk.core.TablePresentationStyles.itemBorderTablePresentationStyle
-        toggles = build(table.commandInputs)
-        for column, toggle in enumerate(toggles):
-            table.addCommandInput(toggle, 0, column)
-        return tuple(toggles)
+            adsk.core.TablePresentationStyles.transparentBackgroundTablePresentationStyle
+        built = build(table.commandInputs, with_captions=True)
+        for index, (toggle, caption) in enumerate(built):
+            table.addCommandInput(toggle, 0, index * 2)
+            table.addCommandInput(caption, 0, index * 2 + 1)
+        return tuple(toggle for toggle, _caption in built)
     except Exception:
         existing = inputs.itemById('holeTypeRow')
         if existing:
             existing.deleteMe()
-        return tuple(build(inputs))
+        # At the top level a checkbox draws its own name, so no captions needed
+        return tuple(toggle for toggle, _caption
+                     in build(inputs, with_captions=False))
 
 
 def _holeTypeChanged(toggles, changed):
