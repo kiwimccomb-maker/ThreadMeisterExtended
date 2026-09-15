@@ -165,6 +165,8 @@ def build_dialog(monkeypatch, last_selected):
     for name, spec in tm_config.get_default_inserts().items():
         monkeypatch.setitem(tm_state.INSERT_SPECS, name, spec)
     monkeypatch.setitem(tm_state.CONFIG, 'last_selected_insert', last_selected)
+    # The dialog both reads and writes this one, so pin it per test
+    monkeypatch.setitem(tm_state.CONFIG, 'hole_type_blind', True)
     monkeypatch.setattr(tm_ui, 'updateInfoText', lambda inputs: None)
     monkeypatch.setattr(tm_state, '_ui', MagicMock())
 
@@ -423,88 +425,84 @@ class TestIcons:
 
 
 class TestHoleType:
+    """Two labelled buttons on one row, like the action buttons. Buttons because
+    the options are mutually exclusive, and because a bool input in a table cell
+    only draws its name when it is a button."""
 
-    def test_it_is_one_row_with_a_caption_beside_each_box(self, heat_dialog):
+    def buttons(self, dialog):
+        return (dialog.cell('holeBlind'), dialog.cell('holeThrough'))
+
+    def test_they_are_buttons_not_checkboxes(self, heat_dialog):
+        for button in self.buttons(heat_dialog):
+            assert button.kind == 'button', 'a checkbox would drop its label'
+
+    def test_they_share_one_row(self, heat_dialog):
         table = heat_dialog.itemById('holeTypeRow')
 
         assert table.kind == 'table'
         assert sorted(table.cells, key=lambda c: c[2]) == [
-            ('holeBlind', 0, 0), ('holeBlindCaption', 0, 1),
-            ('holeThrough', 0, 2), ('holeThroughCaption', 0, 3)]
+            ('holeBlind', 0, 0), ('holeThrough', 0, 1)]
 
-    def test_each_option_says_what_it_is(self, heat_dialog):
-        """A checkbox in a table cell draws the box and drops its name, so the
-        caption has to be a cell of text in its own right."""
-        captions = [heat_dialog.cell(i).spec['text']
-                    for i in ('holeBlindCaption', 'holeThroughCaption')]
+    def test_each_button_says_what_it_is(self, heat_dialog):
+        said = [button.spec['name'] for button in self.buttons(heat_dialog)]
 
-        assert captions == ['Blind Hole', 'Through Hole']
+        assert [text.replace(tm_ui.CHOSEN_MARK, '') for text in said] == \
+            list(tm_ui.HOLE_TYPE_LABELS)
 
-    def test_the_captions_are_read_only(self, heat_dialog):
-        """They are labels, not somewhere to type."""
-        for input_id in ('holeBlindCaption', 'holeThroughCaption'):
-            assert heat_dialog.cell(input_id).spec['readonly'] is True
+    def test_they_are_outlined_like_the_action_buttons(self, heat_dialog):
+        assert heat_dialog.itemById('holeTypeRow').tablePresentationStyle is \
+            adsk.core.TablePresentationStyles.itemBorderTablePresentationStyle
 
-    def test_exactly_one_option_is_selected(self, heat_dialog):
-        on = [heat_dialog.cell(i).value for i in ('holeBlind', 'holeThrough')]
-
-        assert sum(bool(v) for v in on) == 1, 'mutually exclusive'
-
-    def test_the_dialog_hands_the_pair_to_the_handler(self, monkeypatch):
-        """itemById does not reach into a table, so the objects have to be kept."""
-        import tm_ui as ui
-        captured = {}
-        original = ui.InputChangedHandler
-
-        class Capturing(original):
-            def __init__(self):
-                super().__init__()
-                captured['handler'] = self
-
-        monkeypatch.setattr(ui, 'InputChangedHandler', Capturing)
-        build_dialog(monkeypatch, HEAT_SIZE)
-
-        toggles = captured['handler'].holeToggles
-        assert [t.id for t in toggles] == ['holeBlind', 'holeThrough']
+    def test_no_button_is_left_pressed(self, heat_dialog):
+        for button in self.buttons(heat_dialog):
+            assert button.value is False
 
 
 class TestHoleTypeChoice:
-    """The pair is kept consistent by object, and mirrored into CONFIG for
-    everything downstream that cannot look it up."""
+    """One of the two is always in force, marked on its own label, and mirrored
+    into CONFIG for everything that cannot look the buttons up."""
 
-    def toggles(self, dialog):
+    def buttons(self, dialog):
         return (dialog.cell('holeBlind'), dialog.cell('holeThrough'))
 
-    def test_choosing_through_turns_blind_off(self, heat_dialog):
-        blind, through = self.toggles(heat_dialog)
-        through.value = True
+    def test_it_opens_on_the_remembered_choice(self, heat_dialog):
+        blind, through = self.buttons(heat_dialog)
 
-        tm_ui._holeTypeChanged((blind, through), through)
+        assert blind.name.startswith(tm_ui.CHOSEN_MARK)
+        assert not through.name.startswith(tm_ui.CHOSEN_MARK)
 
-        assert through.value is True and blind.value is False
+    def test_pressing_through_chooses_it(self, heat_dialog):
+        buttons = self.buttons(heat_dialog)
 
-    def test_choosing_through_is_remembered(self, heat_dialog):
-        blind, through = self.toggles(heat_dialog)
-        through.value = True
-
-        tm_ui._holeTypeChanged((blind, through), through)
+        tm_ui._holeTypeChanged(buttons, buttons[1])
 
         assert tm_state.CONFIG['hole_type_blind'] is False
 
-    def test_unticking_the_chosen_one_puts_it_back(self, heat_dialog):
-        """Otherwise neither is chosen and there is no hole type at all."""
-        blind, through = self.toggles(heat_dialog)
-        blind.value = False
+    def test_the_chosen_one_is_marked_and_the_other_is_not(self, heat_dialog):
+        blind, through = self.buttons(heat_dialog)
 
-        tm_ui._holeTypeChanged((blind, through), blind)
+        tm_ui._holeTypeChanged((blind, through), through)
 
-        assert blind.value is True
-        assert tm_state.CONFIG['hole_type_blind'] is True
+        assert through.name.startswith(tm_ui.CHOSEN_MARK)
+        assert not blind.name.startswith(tm_ui.CHOSEN_MARK)
+
+    def test_only_ever_one_is_marked(self, heat_dialog):
+        buttons = self.buttons(heat_dialog)
+
+        for pressed in (buttons[1], buttons[0], buttons[1]):
+            tm_ui._holeTypeChanged(buttons, pressed)
+            marked = [b.name.startswith(tm_ui.CHOSEN_MARK) for b in buttons]
+            assert sum(marked) == 1, 'mutually exclusive'
+
+    def test_the_button_does_not_stay_pressed(self, heat_dialog):
+        buttons = self.buttons(heat_dialog)
+
+        tm_ui._holeTypeChanged(buttons, buttons[1])
+
+        assert buttons[1].value is False
 
     def test_it_ignores_anything_that_is_not_one_of_the_pair(self, heat_dialog):
-        blind, through = self.toggles(heat_dialog)
-
-        handled = tm_ui._holeTypeChanged((blind, through),
+        handled = tm_ui._holeTypeChanged(self.buttons(heat_dialog),
                                          heat_dialog.itemById('addChamfer'))
 
         assert handled is False

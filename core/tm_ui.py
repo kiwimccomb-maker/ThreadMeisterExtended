@@ -16,6 +16,11 @@ from tm_execute import CommandExecuteHandler
 INSERT_TYPE_HEAT = 'Heat-Set Insert'
 INSERT_TYPE_GRIP = 'Grip Ridge'
 
+# Hole type, and how the one in force is marked. A button cannot look pressed,
+# so its label says so.
+HOLE_TYPE_LABELS = ('Blind Hole', 'Through Hole')
+CHOSEN_MARK = '\u2713 '
+
 # Fusion sizes the label column to the widest label and hands whatever is left to
 # the value box, with no ratio to set anywhere. Padding the labels is the lever:
 # a wider label column is a narrower box. Non-breaking spaces, so they are not
@@ -297,75 +302,79 @@ def _typeName(is_grip):
 
 
 def _addHoleTypeRow(inputs, blind_first):
-    """Blind and Through side by side, each with its name beside its box.
+    """Blind and Through as two labelled buttons on one row.
 
-    A bool input in a table cell only draws its name when it is a button. As a
-    checkbox it draws the box and nothing else, so the caption goes in a cell of
-    its own as read-only text, where it cannot be dropped. A checkbox rather than
-    a button because a button cannot show which of the two is currently chosen.
+    Buttons, not checkboxes: the two are mutually exclusive, and a bool input in
+    a table cell draws its name only when it is a button. As a checkbox it draws
+    the box and the name goes nowhere, which is how they ended up unlabelled.
 
-    Returns the pair of toggles. The caller has to keep them: an input created
-    inside a table is not found by itemById on the command's inputs, so a lookup
-    would quietly return nothing and the choice would never take effect.
+    A button cannot show which one is in force, so the chosen one is marked in
+    its label by _showHoleType.
+
+    Returns the pair. The caller has to keep them: an input created inside a
+    table is not found by itemById on the command's inputs, so a lookup would
+    quietly return nothing and the choice would never take effect.
     """
-    options = (('holeBlind', 'Blind Hole',
+    options = (('holeBlind', HOLE_TYPE_LABELS[0],
                 'Stops at the depth worked out from the insert and the settings '
                 'below.'),
-               ('holeThrough', 'Through Hole',
+               ('holeThrough', HOLE_TYPE_LABELS[1],
                 'Cuts all the way through the body.'))
+    ratio = ':'.join(str(len(label) + 14) for _id, label, _tip in options)
 
-    def build(collection, with_captions):
+    def build(collection):
         made = []
-        for index, (input_id, label, tip) in enumerate(options):
-            chosen = (index == 0) if blind_first else (index == 1)
-            toggle = collection.addBoolValueInput(
-                input_id, label, True, '', chosen)
-            toggle.tooltip = tip
-            caption = None
-            if with_captions:
-                caption = collection.addTextBoxCommandInput(
-                    input_id + 'Caption', '', label, 1, True)
-                caption.tooltip = tip
-            made.append((toggle, caption))
+        for input_id, label, tip in options:
+            button = collection.addBoolValueInput(input_id, label, False, '', False)
+            button.tooltip = tip
+            made.append(button)
         return made
 
     try:
-        # box, caption, box, caption - the captions get the room
-        table = inputs.addTableCommandInput('holeTypeRow', 'Hole Type', 4, '1:6:1:6')
+        table = inputs.addTableCommandInput('holeTypeRow', 'Hole Type', 2, ratio)
         table.minimumVisibleRows = 1
         table.maximumVisibleRows = 1
         table.hasGrid = False
         table.tablePresentationStyle = \
-            adsk.core.TablePresentationStyles.transparentBackgroundTablePresentationStyle
-        built = build(table.commandInputs, with_captions=True)
-        for index, (toggle, caption) in enumerate(built):
-            table.addCommandInput(toggle, 0, index * 2)
-            table.addCommandInput(caption, 0, index * 2 + 1)
-        return tuple(toggle for toggle, _caption in built)
+            adsk.core.TablePresentationStyles.itemBorderTablePresentationStyle
+        buttons = build(table.commandInputs)
+        for column, button in enumerate(buttons):
+            table.addCommandInput(button, 0, column)
     except Exception:
         existing = inputs.itemById('holeTypeRow')
         if existing:
             existing.deleteMe()
-        # At the top level a checkbox draws its own name, so no captions needed
-        return tuple(toggle for toggle, _caption
-                     in build(inputs, with_captions=False))
+        buttons = build(inputs)
+
+    tm_state.CONFIG['hole_type_blind'] = bool(blind_first)
+    _showHoleType(tuple(buttons))
+    return tuple(buttons)
 
 
-def _holeTypeChanged(toggles, changed):
-    """Keep exactly one of the pair ticked, and say whether it was one of them.
+def _showHoleType(buttons):
+    """Mark whichever hole type is in force.
 
-    Unticking the chosen one would leave no hole type at all, so that puts it
-    back and turns the other off instead.
+    Renaming says it plainly. If a build will not rename an input, grey the
+    chosen one instead, so there is still some sign of which one is set.
     """
-    if not toggles or changed not in toggles:
+    if not buttons or len(buttons) != 2:
+        return
+    is_blind = tm_state.CONFIG.get('hole_type_blind', True)
+    for button, label, chosen in zip(buttons, HOLE_TYPE_LABELS,
+                                     (is_blind, not is_blind)):
+        try:
+            button.name = (CHOSEN_MARK + label) if chosen else label
+        except Exception:
+            button.isEnabled = not chosen
+
+
+def _holeTypeChanged(buttons, changed):
+    """Pressing either button chooses it. Says whether it was one of them."""
+    if not buttons or changed not in buttons:
         return False
-    blind, through = toggles
-    other = through if changed is blind else blind
-    if changed.value:
-        other.value = False
-    else:
-        changed.value = True
-    tm_state.CONFIG['hole_type_blind'] = bool(blind.value)
+    tm_state.CONFIG['hole_type_blind'] = changed is buttons[0]
+    changed.value = False          # release it; it is a button, not a setting
+    _showHoleType(buttons)
     return True
 
 
