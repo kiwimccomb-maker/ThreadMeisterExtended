@@ -40,6 +40,7 @@ def make_selection_input(entities):
 def build_args(insert_name, point_count, is_blind=True, chamfer=False,
                spinner_value_mm=None):
     """Assemble the command inputs the handler reads."""
+    tm_state.CONFIG['hole_type_blind'] = is_blind
     body = MagicMock()
     component = body.parentComponent
     design = component.parentDesign
@@ -60,8 +61,9 @@ def build_args(insert_name, point_count, is_blind=True, chamfer=False,
         'bodySelect': make_selection_input([body]),
         'pointSelect': make_selection_input(points),
         'insertSize': make_input(selectedItem=make_input(name=insert_name)),
-        'holeType': make_input(selectedItem=make_input(
-            name='Blind Hole' if is_blind else 'Through Hole')),
+        # Hole type is read from CONFIG, not from an input: its row lives in a
+        # table, whose contents itemById does not reach.
+
         'addChamfer': make_input(value=chamfer),
         'addBottomRadius': make_input(value=False),
         'exportDebug': None,

@@ -44,10 +44,9 @@ GENERAL_ACTIONS = (('Save', 'Save'),)
 
 # Shown only while the Grip Ridge family is chosen. Two groups rather than one
 # because Fusion will not fold a group nested inside another group.
-GRIP_ONLY_INPUTS = (
-    ('gripRidgeGroup', 'gripShapeGroup', 'gripActions')
-    + tuple('grip' + suffix for _label, suffix in ACTIONS)
-)
+# Hiding the action table hides the buttons in it. Listing the buttons as well
+# would not work anyway: itemById does not find a table's contents.
+GRIP_ONLY_INPUTS = ('gripRidgeGroup', 'gripShapeGroup', 'gripActions')
 
 # Buttons that act immediately and then clear themselves
 ACTION_BUTTONS = (
@@ -130,13 +129,9 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             _fillInsertDropdown(insertDropdown, isGrip, lastSelected)
             lastSelected = _selectedName(insertDropdown) or lastSelected
 
-            # Mutually exclusive and labelled. Stacked rather than side by side:
-            # Fusion's one side-by-side control draws icons with no text, and
-            # anything nested in a table cannot be read back by id.
-            holeType = inputs.addRadioButtonGroupCommandInput('holeType', 'Hole Type')
-            blindFirst = tm_state.CONFIG.get('hole_type_blind', True)
-            holeType.listItems.add('Blind Hole', blindFirst)
-            holeType.listItems.add('Through Hole', not blindFirst)
+            # One bordered row, the same shape as the action buttons
+            onInputChanged.holeToggles = _addHoleTypeRow(
+                inputs, tm_state.CONFIG.get('hole_type_blind', True))
 
             _addHeatInsertGroup(inputs, not isGrip)
             _addGripRidgeGroup(inputs, lastSelected)
@@ -160,6 +155,10 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
 
 
 class InputChangedHandler(adsk.core.InputChangedEventHandler):
+    # Set by CommandCreatedHandler once the row exists. Held rather than looked
+    # up because itemById does not reach inside a table.
+    holeToggles = ()
+
     def notify(self, args):
         try:
             changedInput = args.input
@@ -178,6 +177,9 @@ class InputChangedHandler(adsk.core.InputChangedEventHandler):
                     if pointSelect:
                         pointSelect.isEnabled = True
                         pointSelect.hasFocus = True
+
+            if _holeTypeChanged(self.holeToggles, changedInput):
+                changedId = 'holeType'
 
             # Switching family refills the size list and swaps the visible group
             if changedId == 'insertType':
@@ -292,6 +294,67 @@ def _addInsertTypeInput(inputs, is_grip):
 
 def _typeName(is_grip):
     return INSERT_TYPE_GRIP if is_grip else INSERT_TYPE_HEAT
+
+
+def _addHoleTypeRow(inputs, blind_first):
+    """Blind and Through as one bordered row, laid out like the action buttons.
+
+    Checkboxes rather than buttons because a button cannot show which of the two
+    is currently chosen.
+
+    Returns the pair of inputs. The caller has to keep them: an input created
+    inside a table is not found by itemById on the command's inputs, so a lookup
+    would quietly return nothing and the choice would never take effect.
+    """
+    labels = ('Blind Hole', 'Through Hole')
+    tips = ('Stops at the depth worked out from the insert and the settings below.',
+            'Cuts all the way through the body.')
+    ratio = ':'.join(str(len(label) + 14) for label in labels)
+
+    def build(collection):
+        made = []
+        for column, (label, tip) in enumerate(zip(labels, tips)):
+            toggle = collection.addBoolValueInput(
+                'holeBlind' if column == 0 else 'holeThrough',
+                label, True, '', column == (0 if blind_first else 1))
+            toggle.tooltip = tip
+            made.append(toggle)
+        return made
+
+    try:
+        table = inputs.addTableCommandInput('holeTypeRow', 'Hole Type', 2, ratio)
+        table.minimumVisibleRows = 1
+        table.maximumVisibleRows = 1
+        table.hasGrid = False
+        table.tablePresentationStyle = \
+            adsk.core.TablePresentationStyles.itemBorderTablePresentationStyle
+        toggles = build(table.commandInputs)
+        for column, toggle in enumerate(toggles):
+            table.addCommandInput(toggle, 0, column)
+        return tuple(toggles)
+    except Exception:
+        existing = inputs.itemById('holeTypeRow')
+        if existing:
+            existing.deleteMe()
+        return tuple(build(inputs))
+
+
+def _holeTypeChanged(toggles, changed):
+    """Keep exactly one of the pair ticked, and say whether it was one of them.
+
+    Unticking the chosen one would leave no hole type at all, so that puts it
+    back and turns the other off instead.
+    """
+    if not toggles or changed not in toggles:
+        return False
+    blind, through = toggles
+    other = through if changed is blind else blind
+    if changed.value:
+        other.value = False
+    else:
+        changed.value = True
+    tm_state.CONFIG['hole_type_blind'] = bool(blind.value)
+    return True
 
 
 def _addActionButtons(children, prefix, actions=ACTIONS):
@@ -541,8 +604,7 @@ def updateInfoText(inputs):
         infoText = inputs.itemById('infoText')
 
         insertName = insertSize.selectedItem.name
-        holeType = inputs.itemById('holeType')
-        isBlindHole = holeType.selectedItem.name == 'Blind Hole'
+        isBlindHole = tm_state.CONFIG.get('hole_type_blind', True)
 
         # Live values from the Settings group (CONFIG values until it is built)
         settings = tm_config.read_settings_inputs(inputs)

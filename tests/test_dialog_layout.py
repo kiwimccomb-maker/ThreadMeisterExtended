@@ -6,6 +6,8 @@ lands in the right group, carries a tooltip, and that the type toggle swaps whic
 parameters are on screen.
 """
 
+import io
+import os
 from unittest.mock import MagicMock
 
 import pytest
@@ -16,6 +18,7 @@ import tm_state
 import tm_ui
 
 
+HERE = os.path.dirname(__file__)
 EMPTY_TOOLTIP = ''
 HEAT_SIZE = 'M3 x 5.7mm (standard)'
 GRIP_SIZE = 'M3 Grip'
@@ -86,20 +89,33 @@ class Input:
 
 
 class Inputs:
-    """A CommandInputs collection. Group children share the registry, so
-    itemById finds nested inputs the way Fusion's top-level collection does."""
+    """A CommandInputs collection.
 
-    def __init__(self, registry=None, group=None):
+    Group children share the registry, so itemById finds them the way Fusion's
+    top-level collection does. Table cells deliberately do not: Fusion will not
+    find those either, and pretending otherwise is what let two pickers ship
+    broken. Use `everything` to reach them from a test.
+    """
+
+    def __init__(self, registry=None, everything=None, group=None, in_table=False):
         self.registry = {} if registry is None else registry
+        self.everything = {} if everything is None else everything
         self.group = group
+        self.in_table = in_table
 
     def _add(self, input_id, kind, **spec):
         item = Input(input_id, kind, self.group, **spec)
-        self.registry[input_id] = item
+        self.everything[input_id] = item
+        if not self.in_table:
+            self.registry[input_id] = item
         return item
 
     def itemById(self, input_id):
         return self.registry.get(input_id)
+
+    def cell(self, input_id):
+        """An input wherever it is, including inside a table."""
+        return self.everything.get(input_id)
 
     def addSelectionInput(self, i, n, t):
         return self._add(i, 'selection', name=n, tip=t)
@@ -128,13 +144,15 @@ class Inputs:
 
     def addGroupCommandInput(self, input_id, name):
         group = self._add(input_id, 'group', name=name)
-        group.children = Inputs(self.registry, group=input_id)
+        group.children = Inputs(self.registry, self.everything, group=input_id)
         return group
 
     def addTableCommandInput(self, input_id, name, columns, ratio):
         table = self._add(input_id, 'table', name=name, columns=columns, ratio=ratio)
-        # Fusion creates a table's cell contents in its own commandInputs
-        table.commandInputs = Inputs(self.registry, group=input_id)
+        # Fusion creates a table's cell contents in its own commandInputs, and
+        # does not find them from the command's collection afterwards
+        table.commandInputs = Inputs(self.registry, self.everything,
+                                     group=input_id, in_table=True)
         return table
 
 
@@ -175,13 +193,27 @@ class TestItBuilds:
 
     def test_every_input_the_rest_of_the_code_looks_up_exists(self, grip_dialog):
         expected = {'bodySelect', 'pointSelect', 'insertType', 'insertSize',
-                    'holeType', 'addChamfer', 'addBottomRadius', 'infoText'}
+                    'holeBlind', 'holeThrough', 'addChamfer', 'addBottomRadius',
+                    'infoText'}
         expected |= set(tm_config.SETTINGS_INPUTS)
         expected |= set(tm_config.GRIP_RIDGE_INPUTS)
         expected |= set(tm_ui.ACTION_BUTTONS)
 
-        missing = expected - set(grip_dialog.registry)
+        missing = expected - set(grip_dialog.everything)
         assert not missing, f'not built: {sorted(missing)}'
+
+    def test_nothing_the_code_looks_up_by_id_hides_in_a_table(self):
+        """Fusion does not find a table's contents from the command's inputs, so
+        anything read that way has to be at the top level or in a group."""
+        source = (io.open(os.path.join(HERE, '..', 'core', 'tm_ui.py'),
+                          encoding='utf-8').read()
+                  + io.open(os.path.join(HERE, '..', 'core', 'tm_execute.py'),
+                            encoding='utf-8').read())
+        in_tables = {'holeBlind', 'holeThrough'} | set(tm_ui.ACTION_BUTTONS)
+
+        for input_id in sorted(in_tables):
+            assert f"itemById('{input_id}')" not in source, (
+                f'{input_id} lives in a table; itemById will not find it')
 
     def test_the_dialog_is_not_taller_than_a_laptop_screen(self, monkeypatch):
         """A 600px minimum height put the window off the bottom on first open."""
@@ -325,19 +357,19 @@ class TestActionButtons:
     @pytest.mark.parametrize('button', sorted(tm_ui.ACTION_BUTTONS))
     def test_actions_are_labelled_buttons(self, grip_dialog, button):
         """Words on the button: not an icon, and not a checkbox."""
-        item = grip_dialog.itemById(button)
+        item = grip_dialog.cell(button)
         assert item.kind == 'button'
         assert item.spec['name']
 
     @pytest.mark.parametrize('button', sorted(tm_ui.ACTION_BUTTONS))
     def test_actions_carry_no_tooltip(self, grip_dialog, button):
         """The label already says it; a tooltip would only repeat it."""
-        assert grip_dialog.itemById(button).tooltip == EMPTY_TOOLTIP
+        assert grip_dialog.cell(button).tooltip == EMPTY_TOOLTIP
 
     def test_each_parameter_group_offers_all_three(self, grip_dialog):
         for prefix in ('heat', 'grip'):
             for _label, suffix in tm_ui.ACTIONS:
-                assert grip_dialog.itemById(prefix + suffix) is not None
+                assert grip_dialog.cell(prefix + suffix) is not None
 
     def test_they_share_one_line(self, grip_dialog):
         """A table is what puts them side by side while keeping their labels."""
@@ -351,7 +383,7 @@ class TestActionButtons:
 
     def test_nothing_starts_pressed(self, grip_dialog):
         for button in tm_ui.ACTION_BUTTONS:
-            assert grip_dialog.itemById(button).value is False
+            assert grip_dialog.cell(button).value is False
 
     def test_the_shortest_label_still_gets_room_for_itself(self, grip_dialog):
         """Sizing purely by label length left Save too narrow for the word."""
@@ -392,18 +424,79 @@ class TestIcons:
 
 class TestHoleType:
 
-    def test_it_is_labelled_rather_than_drawn(self, heat_dialog):
-        """Fusion's side-by-side row shows icons only, and these two read better
-        as words."""
-        assert heat_dialog.itemById('holeType').kind == 'radio'
+    def test_it_is_one_bordered_row_like_the_action_buttons(self, heat_dialog):
+        table = heat_dialog.itemById('holeTypeRow')
 
-    def test_it_carries_no_tooltip(self, heat_dialog):
-        assert heat_dialog.itemById('holeType').tooltip == EMPTY_TOOLTIP
+        assert table.kind == 'table'
+        assert table.tablePresentationStyle is \
+            adsk.core.TablePresentationStyles.itemBorderTablePresentationStyle
+        assert sorted(table.cells, key=lambda c: c[2]) == [
+            ('holeBlind', 0, 0), ('holeThrough', 0, 1)]
+
+    def test_each_option_says_what_it_is(self, heat_dialog):
+        assert [heat_dialog.cell(i).spec['name']
+                for i in ('holeBlind', 'holeThrough')] == ['Blind Hole', 'Through Hole']
 
     def test_exactly_one_option_is_selected(self, heat_dialog):
-        holeType = heat_dialog.itemById('holeType')
-        selected = [holeType.listItems.item(i).isSelected
-                    for i in range(holeType.listItems.count)]
+        on = [heat_dialog.cell(i).value for i in ('holeBlind', 'holeThrough')]
 
-        assert sum(selected) == 1, 'mutually exclusive'
-        assert len(selected) == 2
+        assert sum(bool(v) for v in on) == 1, 'mutually exclusive'
+
+    def test_the_dialog_hands_the_pair_to_the_handler(self, monkeypatch):
+        """itemById does not reach into a table, so the objects have to be kept."""
+        import tm_ui as ui
+        captured = {}
+        original = ui.InputChangedHandler
+
+        class Capturing(original):
+            def __init__(self):
+                super().__init__()
+                captured['handler'] = self
+
+        monkeypatch.setattr(ui, 'InputChangedHandler', Capturing)
+        build_dialog(monkeypatch, HEAT_SIZE)
+
+        toggles = captured['handler'].holeToggles
+        assert [t.id for t in toggles] == ['holeBlind', 'holeThrough']
+
+
+class TestHoleTypeChoice:
+    """The pair is kept consistent by object, and mirrored into CONFIG for
+    everything downstream that cannot look it up."""
+
+    def toggles(self, dialog):
+        return (dialog.cell('holeBlind'), dialog.cell('holeThrough'))
+
+    def test_choosing_through_turns_blind_off(self, heat_dialog):
+        blind, through = self.toggles(heat_dialog)
+        through.value = True
+
+        tm_ui._holeTypeChanged((blind, through), through)
+
+        assert through.value is True and blind.value is False
+
+    def test_choosing_through_is_remembered(self, heat_dialog):
+        blind, through = self.toggles(heat_dialog)
+        through.value = True
+
+        tm_ui._holeTypeChanged((blind, through), through)
+
+        assert tm_state.CONFIG['hole_type_blind'] is False
+
+    def test_unticking_the_chosen_one_puts_it_back(self, heat_dialog):
+        """Otherwise neither is chosen and there is no hole type at all."""
+        blind, through = self.toggles(heat_dialog)
+        blind.value = False
+
+        tm_ui._holeTypeChanged((blind, through), blind)
+
+        assert blind.value is True
+        assert tm_state.CONFIG['hole_type_blind'] is True
+
+    def test_it_ignores_anything_that_is_not_one_of_the_pair(self, heat_dialog):
+        blind, through = self.toggles(heat_dialog)
+
+        handled = tm_ui._holeTypeChanged((blind, through),
+                                         heat_dialog.itemById('addChamfer'))
+
+        assert handled is False

@@ -65,6 +65,8 @@ class Recorder:
 
 def build_args(recorder, insert_name, point_count):
     """One sketch, several points on it - the normal way this add-in is used."""
+    import tm_state
+    tm_state.CONFIG['hole_type_blind'] = True
     body = MagicMock()
     body.name = 'Body1'
     # What the coplanar-face fallback has to work with
@@ -106,14 +108,11 @@ def build_args(recorder, insert_name, point_count):
 
     item = MagicMock()
     item.name = insert_name
-    blind = MagicMock()
-    blind.name = 'Blind Hole'
-
     inputs = {
         'bodySelect': selection_input([body]),
         'pointSelect': selection_input(points),
         'insertSize': plain(selectedItem=item),
-        'holeType': plain(selectedItem=blind),
+
         'addChamfer': plain(value=False),
         'addBottomRadius': plain(value=False),
         'exportDebug': None,
